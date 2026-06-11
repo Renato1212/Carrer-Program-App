@@ -116,61 +116,73 @@ function renderCountdown() {
   el.classList.toggle("imminent", ms < 30 * 60000 && ev.impact === "extreme" || ms < 10 * 60000);
 }
 
-/* ---------- briefing ---------- */
+/* ---------- game plan ---------- */
+function zoneCard(z) {
+  const range = z.lo === z.hi ? fmt(z.mid, 4) : `${fmt(z.lo, 4)} – ${fmt(z.hi, 4)}`;
+  const gcls = z.grade === "A+" ? "Ap" : z.grade;
+  return `<div class="zone-card ${z.side}">
+    <div class="zr"><span class="zp">${range}</span>
+      <span class="grade ${gcls}">${z.grade} confluence</span>
+      <span class="impact-chips">${z.labels.slice(0, 4).map(l => `<span>${esc(l)}</span>`).join("")}</span></div>
+    <div class="act">${esc(z.action)}</div></div>`;
+}
+
 async function loadBriefing() {
   const el = $("#tab-briefing");
-  el.innerHTML = `<div class="loading">Generating pre-market briefing for ${state.symbol}…</div>`;
+  el.innerHTML = `<div class="loading">Building the game plan for ${state.symbol}… (cross-referencing profile, composite, flow, calendar — first run takes ~15s)</div>`;
   try {
-    const b = await api(`/briefing?symbol=${state.symbol}`);
-    if (!b.ok) { el.innerHTML = errBox(b.error || "briefing unavailable", "Data source may be briefly rate-limited — try again in ~30s."); return; }
-    const q = b.quote || {};
-    const warn = (b.session_warnings || []).map(w =>
-      `<div class="brief-warning ${/CRITICAL/.test(w) ? "crit" : ""}">${esc(w)}</div>`).join("") ||
-      `<div class="muted small">No special session warnings.</div>`;
-    const oc = b.opening_context;
-    const lv = (b.key_levels || []).map(l => `
-      <tr><td>${esc(l.name)}</td><td class="num">${fmt(l.price, 4)}</td>
-      <td class="num ${cls(-l.distance)}">${sign(-l.distance)}${fmt(-l.distance, 2)}</td>
-      <td><span class="badge ${l.fresh ? "fresh" : "tested"}">${l.fresh ? "first touch" : `tested ×${l.touches_2d}`}</span></td>
-      <td class="muted small">${esc(l.note || "")}</td></tr>`).join("");
-    const setups = (b.suggested_setups || []).map(s =>
-      `<li><b>${esc(s.id)}</b> — ${esc(s.reason)} <button class="link goto-pb">open playbook</button></li>`).join("");
-    const rates = ((b.rates || {}).implied_path || []).filter(m => m.ok).map(m =>
-      `<li>${esc(m.meeting)} (${m.days_until}d): implied ${fmt(m.implied_post_rate, 2)}% ` +
-      `(${sign(m.implied_change_bp)}${fmt(m.implied_change_bp, 0)}bp) — ` +
-      m.scenarios.map(s => `${s.move_bp}bp: ${s.prob}%`).join(" / ") + `</li>`).join("");
-    const g = b.gamma || {};
+    const d = await api(`/gameplan/${state.symbol}`);
+    if (!d.ok) { el.innerHTML = errBox(d.error || "game plan unavailable", "Free data source may be briefly rate-limited — try again in ~30s."); return; }
+    const q = d.quote || {};
+    const g = d.gamma || {};
+    const ev = d.next_major_event;
+    const chips = `
+      <div class="chip-row">
+        <div class="chip"><span class="lbl">${esc(d.symbol)}</span> ${fmt(d.last, 2)}
+          <span class="${cls(q.change_pct)}">${sign(q.change_pct)}${fmt(q.change_pct, 2)}%</span></div>
+        ${g.ok ? `<div class="chip"><span class="lbl">Gamma</span> <span class="${g.regime === "positive" ? "up" : "down"}">${esc(g.regime)}</span></div>` : ""}
+        ${ev ? `<div class="chip"><span class="lbl">Next event</span> ${esc(ev.event)} · ${ev.days_until === 0 ? "TODAY " + esc(ev.time) : ev.days_until + "d"}</div>` : ""}
+        <div class="chip"><span class="lbl">Plan time</span> ${esc(d.generated.slice(11, 16))} ET</div>
+      </div>`;
+    const warn = (d.warnings || []).map(w =>
+      `<div class="brief-warning ${/CRITICAL|extreme/i.test(w) ? "crit" : ""}">${esc(w)}</div>`).join("");
+    const above = (d.zones_above || []).slice().reverse();   // farthest first for ladder
+    const ladder = `
+      <div class="ladder">
+        ${above.map(zoneCard).join("") || `<p class="muted small">No mapped zones above.</p>`}
+        <div class="price-divider"><span class="line"></span><span class="px">${fmt(d.last, 2)}</span><span class="line"></span></div>
+        ${(d.zones_below || []).map(zoneCard).join("") || `<p class="muted small">No mapped zones below.</p>`}
+      </div>`;
+    const ideas = (d.ideas || []).map(i => `
+      <div class="idea-card"><div class="h">${esc(i.what)} <span class="grade ${i.grade === "A+" ? "Ap" : i.grade}">${i.grade}</span>
+        <span class="num muted">${esc(i.zone)}</span></div>
+        <p><span class="k">If it rejects:</span> ${esc(i.plan_fade)}</p>
+        <p><span class="k">If it accepts:</span> ${esc(i.plan_break)}</p></div>`).join("");
+    const setups = (d.suggested_setups || []).map(s =>
+      `<li><b>${esc(s.id)}</b> — ${esc(s.reason)} <button class="link goto-pb">playbook</button></li>`).join("");
     el.innerHTML = `
-      <div class="panel"><div class="panel-title">☀ Session Warnings — <span class="accent">${esc(b.symbol)}</span>
-        <small>${esc(b.generated)} · last ${fmt(q.last, 2)} <span class="${cls(q.change_pct)}">${sign(q.change_pct)}${fmt(q.change_pct, 2)}%</span></small></div>${warn}</div>
+      ${chips}
+      ${warn ? `<div class="panel">${warn}</div>` : ""}
       <div class="grid2">
-        <div class="panel"><div class="panel-title">Opening Context <small>Day 8 decision tree, automated</small></div>
-          ${oc ? `<p><b class="accent">${esc(oc.zone)}</b> <span class="muted small">(ref: ${fmt(oc.reference, 2)} — ${esc(oc.reference_source)})</span></p>
-          <p class="mt8">${esc(oc.bias)}</p>
-          ${oc.overnight_note ? `<p class="mt8" style="color:var(--amber)">${esc(oc.overnight_note)}</p>` : ""}
-          <p class="mt8 muted small">${esc(oc.first_hour_rule)}</p>
-          ${b.prior_day_type ? `<p class="mt12"><b>Prior day type:</b> ${esc(b.prior_day_type.type)} <span class="muted small">${esc(b.prior_day_type.note)}</span></p>` : ""}`
-          : errBox(b.levels_error || "levels unavailable", "Intraday data not reachable right now.")}</div>
-        <div class="panel"><div class="panel-title">Today &amp; What's Priced In</div>
-          ${(b.today_events || []).length ? `<ul class="clean">${b.today_events.map(e =>
-            `<li><span class="badge ${e.impact}">${e.impact}</span> <b>${esc(e.event)}</b> ${esc(e.time)}${e.approx ? " <span class='muted'>~</span>" : ""}</li>`).join("")}</ul>`
-            : `<p class="muted small">No tier-1 releases today.</p>`}
-          ${b.next_major_event ? `<p class="mt8 small">Next major: <b>${esc(b.next_major_event.event)}</b> ${esc(b.next_major_event.date)} (${b.next_major_event.days_until}d)</p>` : ""}
-          <div class="mt12"><b>Fed path (ZQ-implied)</b>${rates ? `<ul class="clean small">${rates}</ul>` : `<p class="muted small">ZQ contracts unavailable right now.</p>`}</div>
-          <div class="mt12"><b>Dealer gamma:</b> ${g.ok ? `<span class="${g.regime === "positive" ? "gex-pos" : "gex-neg"}">${esc(g.regime)}</span>
-            <span class="muted small"> flip ≈ ${fmt(g.zero_gamma, 0)} · max pain ${fmt(g.max_pain_front, 0)} (proxy) · P/C ${fmt(g.put_call_oi_ratio, 2)}</span>
-            <p class="small mt8">${esc(g.read)}</p>` : `<span class="muted small">${esc(g.error || "unavailable")}</span>`}</div></div>
+        <div class="panel"><div class="panel-title">📖 The Story <small>what the market has been doing, in order</small></div>
+          <ol class="story-list">${(d.story || []).map(s => `<li>${esc(s)}</li>`).join("")}</ol>
+          ${!d.composite_ok ? `<p class="mt8 muted small">Multi-day composite unavailable: ${esc(d.composite_error || "")}</p>` : ""}</div>
+        <div class="panel"><div class="panel-title">🗺 Trade Map <small>every module's levels, clustered &amp; graded — trade zone to zone</small></div>
+          ${ladder}</div>
       </div>
       <div class="grid2">
-        <div class="panel"><div class="panel-title">Key Levels <small>marked before the open — Day 2 · green = first touch</small></div>
-          ${lv ? `<table><tr><th>Level</th><th>Price</th><th>Away</th><th>Freshness</th><th></th></tr>${lv}</table>`
-               : `<p class="muted small">Levels appear when intraday data is reachable.</p>`}</div>
-        <div class="panel"><div class="panel-title">Suggested Setups for This Context</div>
-          ${setups ? `<ul class="clean">${setups}</ul>` : `<p class="muted small">No strong contextual match — that is information too (Day 1: when uncertain, don't force).</p>`}
-          <div class="mt12"><b>Pre-open checklist</b><ul class="clean small">${(b.checklist || []).map(c => `<li>${esc(c)}</li>`).join("")}</ul></div></div>
+        <div class="panel"><div class="panel-title">⚔ Today's Trade Ideas <small>if/then plans at the nearest strong zones</small></div>
+          ${ideas || `<p class="muted small">No graded zones near price — wait for the market to come to a mapped area (Day 5: only asymmetric trades).</p>`}
+          ${setups ? `<div class="mt12"><b>Context-matched setups</b><ul class="clean small">${setups}</ul></div>` : ""}</div>
+        <div class="panel"><div class="panel-title">✅ Today's Do / Don't</div>
+          <div class="dd-grid">
+            <div><b class="up">Do</b><ul class="clean small">${(d.do || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
+            <div class="dont"><b class="down">Don't</b><ul class="clean small">${(d.dont || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
+          </div>
+          <div class="mt12"><b>Pre-open checklist</b><ul class="clean small">${(d.checklist || []).map(c => `<li>${esc(c)}</li>`).join("")}</ul></div></div>
       </div>`;
     $$(".goto-pb", el).forEach(btn => btn.onclick = () => $(`#tabs button[data-tab="playbooks"]`).click());
-  } catch (e) { el.innerHTML = errBox("Briefing failed: " + e.message, "Refresh in a moment — free data sources occasionally throttle."); }
+  } catch (e) { el.innerHTML = errBox("Game plan failed: " + e.message, "Refresh in a moment — free data sources occasionally throttle."); }
 }
 
 /* ---------- board / live desk ---------- */
@@ -376,13 +388,65 @@ function computeSizer() {
        <div class="muted small mt8">Only take it if the realistic target beats the stop distance — asymmetry or pass (Day 5).</div>`;
 }
 
-/* ---------- profile ---------- */
-async function loadProfile(day) {
+/* ---------- profile (multi-day) ---------- */
+async function loadProfile(day, compDays) {
   const el = $("#tab-profile");
-  el.innerHTML = `<div class="loading">Building market profile for ${state.symbol}…</div>`;
+  el.innerHTML = `<div class="loading">Building ${compDays || 10}-day composite + session profile for ${state.symbol}…</div>`;
+  let compHtml = "";
+  try {
+    const c = await api(`/composite/${state.symbol}?days=${compDays || 10}`);
+    if (c.ok) {
+      const cp = c.composite;
+      const max = Math.max(...cp.levels.map(l => l.volume), 1);
+      const bars = [...cp.levels].reverse().map(l => {
+        const k = l.price === cp.poc ? "vpoc" : cp.hvn.some(p => Math.abs(p - l.price) < 1e-9) ? "hvn"
+                : cp.lvn.some(p => Math.abs(p - l.price) < 1e-9) ? "lvn" : "";
+        const mark = l.price === cp.poc ? " ◀cPOC" : l.price === cp.vah ? " ◀cVAH" : l.price === cp.val ? " ◀cVAL" : "";
+        return `<div class="vp-row ${k}"><span class="p">${fmt(l.price, 4)}${mark}</span>
+          <div class="bar" style="width:${Math.max(1, l.volume / max * 100)}%"></div></div>`;
+      }).join("");
+      const mig = c.sessions.slice().reverse().map(s => `
+        <tr><td class="num">${esc(s.day)}</td>
+        <td>${esc(s.day_type)}${s.poor_high ? " ⚑ph" : ""}${s.poor_low ? " ⚑pl" : ""}</td>
+        <td class="num">${fmt(s.poc, 2)}</td>
+        <td class="num muted">${fmt(s.val, 2)}–${fmt(s.vah, 2)}</td>
+        <td class="num">${fmt(s.close, 2)}</td>
+        <td>${s.relation ? `<span class="rel ${esc(s.relation)}">${esc(s.relation_label)}</span>` : "<span class='muted'>—</span>"}</td></tr>`).join("");
+      const magnet = (list, kind) => list.map(x => `
+        <tr><td>${esc(kind === "npoc" ? "Naked POC" : kind === "gap" ? `Unfilled gap (${x.side})` : x.kind)}</td>
+        <td class="num">${kind === "gap" ? `${fmt(x.from, 2)}–${fmt(x.to, 2)}` : fmt(x.price, 2)}</td>
+        <td class="num muted">${esc(x.day)}</td>
+        <td class="num ${cls(-x.distance)}">${sign(-x.distance)}${fmt(-x.distance, 2)} away</td></tr>`).join("");
+      const magnets = magnet(c.naked_pocs, "npoc") + magnet(c.unfilled_gaps, "gap") + magnet(c.untested_extremes, "ext");
+      compHtml = `
+        <div class="panel"><div class="panel-title">📈 Value Migration — last ${c.days_used} sessions
+          <span class="seg" id="comp-days">
+            <button data-d="5" ${(compDays || 10) == 5 ? 'class="active"' : ""}>5d</button>
+            <button data-d="10" ${(compDays || 10) == 10 ? 'class="active"' : ""}>10d</button>
+            <button data-d="20" ${(compDays || 10) == 20 ? 'class="active"' : ""}>20d</button>
+          </span></div>
+          <p class="small" style="color:${c.value_trend.direction === "up" ? "var(--green)" : c.value_trend.direction === "down" ? "var(--red)" : "var(--amber)"}">
+          <b>${esc(c.value_trend.note)}</b></p>
+          <table class="mt8"><tr><th>Session</th><th>Day type</th><th>POC</th><th>Value area</th><th>Close</th><th>Relation vs prior</th></tr>${mig}</table>
+          <p class="mt8 muted small">${esc(c.explainers.migration)}</p></div>
+        <div class="grid2">
+          <div class="panel"><div class="panel-title">${c.days_used}-Day Composite Profile
+            <small>cPOC ${fmt(cp.poc, 2)} · cVA ${fmt(cp.val, 2)}–${fmt(cp.vah, 2)} · last ${fmt(c.last, 2)}</small></div>
+            <div style="max-height:520px;overflow-y:auto">${bars}</div>
+            <p class="mt8 muted small">${esc(c.explainers.composite)}</p></div>
+          <div class="panel"><div class="panel-title">🧲 Magnets &amp; Unfinished Business <small>what the market still owes</small></div>
+            ${magnets ? `<table><tr><th>What</th><th>Price</th><th>From</th><th>Distance</th></tr>${magnets}</table>`
+                      : `<p class="muted small">Nothing untested nearby — the market has cleaned up its business. Lean on the composite zones.</p>`}
+            <p class="mt8 muted small">${esc(c.explainers.naked_poc)}</p></div>
+        </div>`;
+    } else {
+      compHtml = `<div class="panel">${errBox("Composite unavailable: " + (c.error || ""), "Needs 30-min history — retry if rate-limited.")}</div>`;
+    }
+  } catch (e) { compHtml = `<div class="panel">${errBox("Composite failed: " + e.message)}</div>`; }
+  let singleHtml = "";
   try {
     const d = await api(`/profile/${state.symbol}${day ? `?day=${day}` : ""}`);
-    if (!d.ok) { el.innerHTML = errBox("Profile unavailable: " + (d.error || ""), "Needs Yahoo intraday data — retry shortly if rate-limited."); return; }
+    if (!d.ok) { el.innerHTML = compHtml + errBox("Session profile unavailable: " + (d.error || "")); wireProfileControls(); return; }
     const t = d.tpo;
     const daySel = `<select id="profile-day">${d.available_days.map(x =>
       `<option ${x === d.day ? "selected" : ""}>${x}</option>`).join("")}</select>`;
@@ -403,8 +467,8 @@ async function loadProfile(day) {
       }).join("");
     }
     const fa = t.failed_auction;
-    el.innerHTML = `
-      <div class="panel"><div class="panel-title">Session ${daySel} — <span class="accent">${esc(state.symbol)}</span>
+    singleHtml = `
+      <div class="panel"><div class="panel-title">🔍 Single-Session Drill-Down ${daySel} — <span class="accent">${esc(state.symbol)}</span>
         <small>O ${fmt(t.open,2)} · H ${fmt(t.high,2)} · L ${fmt(t.low,2)} · C ${fmt(t.close,2)} · IB ${fmt(t.ib_low,2)}–${fmt(t.ib_high,2)}</small></div>
         <p><b>Day type: <span class="accent">${esc(t.day_type.type)}</span></b> <span class="muted small">(IB ${fmt(t.day_type.ib_pct_of_range*100,0)}% of range, close at ${fmt(t.day_type.close_location*100,0)}%)</span></p>
         <p class="mt8 small">${esc(t.day_type.note)}</p>
@@ -421,8 +485,15 @@ async function loadProfile(day) {
       </div>
       ${d.prior_tpo ? `<div class="panel"><div class="panel-title">Prior Session (${esc(d.prior_day)}) reference</div>
         <p class="small num">POC ${fmt(d.prior_tpo.poc,2)} · VAH ${fmt(d.prior_tpo.vah,2)} · VAL ${fmt(d.prior_tpo.val,2)} · H ${fmt(d.prior_tpo.high,2)} · L ${fmt(d.prior_tpo.low,2)} — day type: ${esc(d.prior_tpo.day_type.type)}</p></div>` : ""}`;
-    $("#profile-day").onchange = e => loadProfile(e.target.value);
-  } catch (e) { el.innerHTML = errBox("Profile failed: " + e.message); }
+  } catch (e) { singleHtml = errBox("Session profile failed: " + e.message); }
+  el.innerHTML = compHtml + singleHtml;
+  wireProfileControls(compDays);
+}
+
+function wireProfileControls(compDays) {
+  const ds = $("#profile-day");
+  if (ds) ds.onchange = e => loadProfile(e.target.value, compDays);
+  $$("#comp-days button").forEach(b => b.onclick = () => loadProfile(undefined, parseInt(b.dataset.d, 10)));
 }
 
 /* ---------- calendar ---------- */

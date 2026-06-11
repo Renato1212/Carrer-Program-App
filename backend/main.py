@@ -11,9 +11,10 @@ from fastapi import Body, FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.services import (briefing, correlations, econ_calendar, fedwatch,
-                              flow, journal, levels, market_data, news,
-                              orderflow, playbooks, predictions, profile)
+from backend.services import (briefing, composite, correlations, econ_calendar,
+                              fedwatch, flow, gameplan, journal, levels,
+                              market_data, news, orderflow, playbooks,
+                              predictions, profile)
 
 app = FastAPI(title="EdgeDesk", version="1.1",
               description="Free-data command center for futures day traders")
@@ -55,6 +56,16 @@ def rel_volume(symbol: str):
 @app.get("/api/profile/{symbol}")
 def session_profile(symbol: str, day: str | None = Query(default=None)):
     return guard(profile.session_profile, symbol.upper(), day)
+
+
+@app.get("/api/composite/{symbol}")
+def composite_profile(symbol: str, days: int = 10):
+    return guard(composite.composite_pack, symbol.upper(), days)
+
+
+@app.get("/api/gameplan/{symbol}")
+def game_plan(symbol: str):
+    return guard(gameplan.build, symbol.upper())
 
 
 @app.get("/api/levels/{symbol}")
