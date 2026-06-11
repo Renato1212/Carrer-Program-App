@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EdgeDesk — Futures Day Trader Command Center</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<header>
+  <div class="brand">EDGE<span>DESK</span> <small>futures command center</small></div>
+  <div class="symbol-picker">
+    <label>Instrument</label>
+    <select id="symbol-select"></select>
+  </div>
+  <div id="clock" class="clock"></div>
+</header>
+
+<nav id="tabs">
+  <button data-tab="briefing" class="active">Briefing</button>
+  <button data-tab="board">Board</button>
+  <button data-tab="profile">Profile</button>
+  <button data-tab="calendar">Calendar</button>
+  <button data-tab="news">News Radar</button>
+  <button data-tab="cb">Central Banks</button>
+  <button data-tab="flow">Flow / GEX</button>
+  <button data-tab="playbooks">Playbooks</button>
+  <button data-tab="journal">Journal</button>
+</nav>
+
+<main>
+  <section id="tab-briefing" class="tab active"><div class="loading">Generating pre-market briefing…</div></section>
+  <section id="tab-board" class="tab">
+    <div id="board-grid" class="board-grid"><div class="loading">Loading board…</div></div>
+    <div class="panel">
+      <div class="panel-title">Chart <span id="chart-symbol"></span>
+        <span class="seg" id="chart-intervals">
+          <button data-i="1m" data-p="1d">1m</button>
+          <button data-i="5m" data-p="5d" class="active">5m</button>
+          <button data-i="30m" data-p="1mo">30m</button>
+          <button data-i="1d" data-p="6mo">D</button>
+        </span>
+      </div>
+      <div id="chart" style="height:380px"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Relative Volume by 30-min Slot <small>(Day 4: trade breakouts when volume is high)</small></div>
+      <canvas id="relvol-canvas" height="140"></canvas>
+    </div>
+  </section>
+  <section id="tab-profile" class="tab"><div class="loading">Building market profile…</div></section>
+  <section id="tab-calendar" class="tab"><div class="loading">Loading calendar…</div></section>
+  <section id="tab-news" class="tab"><div class="loading">Scanning wires…</div></section>
+  <section id="tab-cb" class="tab"><div class="loading">Reading rate markets…</div></section>
+  <section id="tab-flow" class="tab"><div class="loading">Computing dealer gamma…</div></section>
+  <section id="tab-playbooks" class="tab"><div class="loading">Loading playbooks…</div></section>
+  <section id="tab-journal" class="tab"><div class="loading">Opening journal…</div></section>
+</main>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

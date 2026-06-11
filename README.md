@@ -1,0 +1,73 @@
+# EdgeDesk — Futures Day Trader Command Center
+
+A free-data, self-hosted trading infrastructure built around the 14-day Career
+Program. It turns the program's principles into running software: automated
+pre-market briefings, Market Profile / TPO analytics, a CME-FedWatch-style rate
+engine, dealer gamma (GEX) maps, a severity-scored news radar, a scheduled-news
+war calendar, and a journal that audits your trades against the program's rules.
+
+**100% free data.** Yahoo Finance (quotes, intraday history, option chains,
+Fed Funds futures), official central-bank & financial-media RSS wires, and
+rule-generated calendars. No API keys, no subscriptions, no paid feeds.
+
+---
+
+## Quick start
+
+```bash
+pip install -r requirements.txt
+uvicorn backend.main:app --port 8000
+```
+
+Open **http://localhost:8000** — needs internet access for live data.
+
+---
+
+## The nine desks
+
+| Desk | What it gives you |
+|---|---|
+| **Briefing** | The Day 8 pre-open routine, automated: opening context vs prior value/range (decision tree), gap classification (Day 3), prior day type, auto-marked key levels with first-touch freshness (Day 2), today's events + what's priced in, dealer gamma regime, and setups suggested *for this exact context*. |
+| **Board** | Full futures board (indices, energy, metals, rates, FX, crypto) + context tape (VIX, DXY, yields), candlestick charts, and relative volume by 30-min slot (Day 4: trade breakouts when volume is high). |
+| **Profile** | TPO / Market Profile built from intraday data: POC, value area, Initial Balance, day-type classifier (trend / normal / neutral / P / b), poor highs/lows, single prints, failed-auction detector (Day 8's favorite play), plus a volume profile with HVN/LVN detection (Day 6). |
+| **Calendar** | Scheduled-news war calendar: FOMC (published dates), NFP, CPI, PPI, PCE, ISM, claims, EIA, auctions, OPEX/quad witching — each with an event-specific trading playbook and countdown. |
+| **News Radar** | Free RSS aggregation (Fed, ECB, BLS, CNBC, MarketWatch, Yahoo) with tiered severity scoring — crisis/geopolitical shocks float to the top tagged with the instruments they hit, plus the unscheduled-news playbook. |
+| **Central Banks** | Implied rate path and hike/cut probabilities backed out of 30-Day Fed Funds futures (ZQ) — the same math as CME FedWatch; yield curve; other-CB watchlist; the Day 14 prep process; rolling cross-asset correlation matrix with regime-shift alerts. |
+| **Flow / GEX** | Dealer gamma exposure by strike from free option chains (SPY/QQQ/IWM proxies), zero-gamma flip level, max pain, put/call OI, expiration calendar (weekly/monthly OPEX, quad witching, VIX settle, month-end). |
+| **Playbooks** | The whole 14-day program codified: 11 executable setup cards (context / trigger / entry / stop / target / why it works) + every principle, by day. |
+| **Journal** | SQLite journal with the Day 1 philosophy built in: expectancy, profit factor, R-distribution, edge-by-setup table, equity curve, max drawdown — and a **principles audit** that flags no-stop trades, style drift, impulse trades, losers held past −1.5R, and inverted win/loss asymmetry. |
+
+## How the program maps to the software
+
+- **Day 1** → journal metrics judged combined, never win rate alone; uncertainty warnings on event days.
+- **Day 2** → key-levels engine with first-touch tracking and HTF weighting.
+- **Day 3** → gap classifier (just-outside vs far-extended) wired into the opening briefing.
+- **Day 4** → relative-volume-by-time curve; breakout conditions in setup cards.
+- **Day 5** → asymmetry checks: R-multiples everywhere, style-drift flag.
+- **Days 6–9** → TPO/volume profile engines, day types, failed auctions, value migration, poor extremes.
+- **Days 10–13** → encoded as order-flow setup cards (absorption pullback, stop-catch, LVN acceleration).
+- **Day 14** → the FedWatch engine + central-bank prep checklist + statement-diff workflow.
+
+## Architecture
+
+```
+backend/          FastAPI + pandas/numpy/yfinance/httpx
+  services/       one module per desk (market_data, profile, levels, fedwatch,
+                  econ_calendar, news, flow, correlations, briefing, playbooks, journal)
+frontend/         zero-build vanilla JS + lightweight-charts (CDN), dark terminal UI
+data/journal.db   created automatically (SQLite)
+```
+
+Every service degrades gracefully — if a free source is unreachable you get a
+labeled error in that panel, never a crash.
+
+## Honest limitations (free data is free)
+
+- Yahoo intraday: 1m ≈ 7 days back, 30m ≈ 60 days; quotes are slightly delayed.
+- GEX uses ETF option proxies (SPY→ES etc.) — translate strikes proportionally.
+- Calendar dates marked `~` follow the typical release pattern — verify exact
+  dates on bls.gov / bea.gov; FOMC dates are the published schedule.
+- No tick/DOM data on free feeds — order-flow principles (Days 10–13) are
+  delivered as structured playbooks rather than a live DOM.
+
+This tool is infrastructure and education, not financial advice.
