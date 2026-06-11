@@ -70,24 +70,34 @@ def _impacts(text: str) -> list[str]:
     return hits or ["ES"]
 
 
+def _local(tag) -> str:
+    return str(tag).rsplit("}", 1)[-1].lower()
+
+
 def _parse_feed(xml_text: str, source: str, weight: float) -> list[dict]:
+    """Namespace-agnostic parser: handles RSS 2.0, RSS 1.0/RDF (ECB) and Atom."""
     items = []
     try:
         root = ET_XML.fromstring(xml_text.encode() if isinstance(xml_text, str) else xml_text)
     except ET_XML.ParseError:
         return items
-    ns = {"atom": "http://www.w3.org/2005/Atom", "dc": "http://purl.org/dc/elements/1.1/"}
-    nodes = root.findall(".//item") or root.findall(".//atom:entry", ns)
+    nodes = [el for el in root.iter() if _local(el.tag) in ("item", "entry")]
     for it in nodes[:25]:
-        def grab(*tags):
-            for tg in tags:
-                el = it.find(tg, ns)
-                if el is not None and (el.text or el.get("href")):
-                    return (el.text or el.get("href", "")).strip()
+        fields: dict[str, str] = {}
+        for child in it:
+            name = _local(child.tag)
+            val = (child.text or "").strip() or (child.get("href") or "").strip()
+            if val and name not in fields:
+                fields[name] = val
+
+        def grab(*names):
+            for n in names:
+                if fields.get(n):
+                    return fields[n]
             return ""
-        title = html.unescape(re.sub(r"<[^>]+>", "", grab("title", "atom:title")))
-        link = grab("link", "atom:link")
-        pub = grab("pubDate", "atom:updated", "atom:published", "dc:date")
+        title = html.unescape(re.sub(r"<[^>]+>", "", grab("title")))
+        link = grab("link", "id")
+        pub = grab("pubdate", "updated", "published", "date")
         ts = None
         for parser in (parsedate_to_datetime, datetime.fromisoformat):
             try:

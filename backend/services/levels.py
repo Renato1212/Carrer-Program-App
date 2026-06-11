@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
+import pandas as pd
+
 from backend.services import market_data as md
 from backend.services import profile as prof
 
@@ -53,18 +55,18 @@ def key_levels(symbol: str) -> dict:
     on_high = float(on_df.High.max()) if not on_df.empty else None
     on_low = float(on_df.Low.min()) if not on_df.empty else None
 
-    # Weekly refs from daily-ish aggregation of 30m
-    wk = df30.last("7D")
+    # Weekly refs (DataFrame.last() was removed in pandas 3 - filter by index)
+    wk = df30[df30.index >= df30.index.max() - pd.Timedelta(days=7)]
     week_high, week_low = float(wk.High.max()), float(wk.Low.min())
 
     last = float(df5.iloc[-1].Close)
+    recent = df5[df5.index >= df5.index.max() - pd.Timedelta(days=2)]
 
     levels = []
 
     def add(name, price, kind, note=""):
         if price is None:
             return
-        recent = df5.last("2D")
         touches = _touched(recent, price)
         levels.append({
             "name": name, "price": round(float(price), 4), "kind": kind,

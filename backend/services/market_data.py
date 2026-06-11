@@ -6,6 +6,7 @@ Everything is cached briefly so the app stays inside free-tier etiquette.
 from __future__ import annotations
 
 import math
+import os
 from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -13,6 +14,15 @@ import pandas as pd
 import yfinance as yf
 
 from backend.cache import ttl_cache
+
+# Serverless filesystems are read-only outside /tmp; keep yfinance caches there.
+if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+    os.environ.setdefault("HOME", "/tmp")
+    os.environ.setdefault("XDG_CACHE_HOME", "/tmp/.cache")
+    try:
+        yf.set_tz_cache_location("/tmp/yf-tz-cache")
+    except Exception:
+        pass
 
 ET = ZoneInfo("America/New_York")
 

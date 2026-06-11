@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from backend.services import econ_calendar, fedwatch, flow, levels, news as news_svc
 from backend.services import market_data as md
+from backend.services import predictions
 
 ET = ZoneInfo("America/New_York")
 
@@ -66,6 +67,7 @@ def premarket_briefing(symbol: str = "ES") -> dict:
         v = vix["last"]
         regime = "low-vol grind" if v < 15 else "normal" if v < 22 else "elevated" if v < 30 else "crisis"
         warnings.append(f"VIX {v:.1f} ({regime}) - calibrate stop distance and size to this regime.")
+    warnings.extend(predictions.top_swings_for_briefing())
 
     return {
         "ok": True,
