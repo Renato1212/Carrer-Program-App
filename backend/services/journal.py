@@ -7,11 +7,16 @@ are visible by playbook.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "journal.db"
+# Serverless platforms (Vercel/Lambda) only allow writes under /tmp; there the
+# journal is ephemeral and shared across visitors - run locally for a real one.
+_default_db = Path(__file__).resolve().parent.parent.parent / "data" / "journal.db"
+DB_PATH = Path(os.environ.get("EDGEDESK_DB") or
+               (Path("/tmp/edgedesk-journal.db") if os.environ.get("VERCEL") else _default_db))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trades (
