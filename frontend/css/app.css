@@ -258,6 +258,17 @@ button.link { background: none; border: none; color: var(--blue); cursor: pointe
 .rel.lower, .rel.overlap-down { background: #401118; color: var(--red); }
 .rel.inside { background: #3b2d07; color: var(--amber); }
 
+/* ---------- profile workbench ---------- */
+.wb-controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;
+  padding: 10px 12px; background: #0d141f; border: 1px solid var(--border-soft); border-radius: 10px; }
+.wb-group { display: flex; align-items: center; gap: 8px; }
+.wb-lbl { font: 700 9.5px Inter; letter-spacing: 1.2px; text-transform: uppercase; color: #56708c; }
+.wb-tip { display: none; position: absolute; z-index: 10; pointer-events: none;
+  background: #0d141fee; border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px;
+  font: 11.5px var(--mono); line-height: 1.6; box-shadow: var(--shadow); max-width: 230px; }
+#wb-canvas { cursor: crosshair; }
+#wb-canvas-wrap .loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+
 .muted { color: var(--muted); }
 .small { font-size: 12.5px; }
 .mt8 { margin-top: 8px; } .mt12 { margin-top: 12px; }

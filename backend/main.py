@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.services import (briefing, composite, correlations, econ_calendar,
                               fedwatch, flow, gameplan, journal, levels,
                               market_data, news, orderflow, playbooks,
-                              predictions, profile)
+                              predictions, profile, profile_adv)
 
 app = FastAPI(title="EdgeDesk", version="1.1",
               description="Free-data command center for futures day traders")
@@ -61,6 +61,11 @@ def session_profile(symbol: str, day: str | None = Query(default=None)):
 @app.get("/api/composite/{symbol}")
 def composite_profile(symbol: str, days: int = 10):
     return guard(composite.composite_pack, symbol.upper(), days)
+
+
+@app.get("/api/profile-advanced/{symbol}")
+def profile_advanced(symbol: str, days: int = 10, session: str = "rth", va: float = 70.0):
+    return guard(profile_adv.workbench, symbol.upper(), days, session, va)
 
 
 @app.get("/api/gameplan/{symbol}")

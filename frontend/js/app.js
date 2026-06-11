@@ -388,112 +388,329 @@ function computeSizer() {
        <div class="muted small mt8">Only take it if the realistic target beats the stop distance — asymmetry or pass (Day 5).</div>`;
 }
 
-/* ---------- profile (multi-day) ---------- */
-async function loadProfile(day, compDays) {
+/* ---------- profile workbench ---------- */
+const WB_COLORS = { bar: "#2c4258", va: "#3d7ab5", poc: "#fbbf24", single: "#a78bfa",
+                    ib: "#a78bfa", naked: "#fbbf24", grid: "#16202f", text: "#56708c" };
+
+function wbState() {
+  if (!state.wb) state.wb = { days: 10, session: "rth", mode: "tpo", va: 70,
+    show: {trail: true, vaBand: true, ib: true, oc: true, singles: true, naked: true},
+    typeFilter: "", data: null };
+  return state.wb;
+}
+
+async function loadProfile() {
   const el = $("#tab-profile");
-  el.innerHTML = `<div class="loading">Building ${compDays || 10}-day composite + session profile for ${state.symbol}…</div>`;
-  let compHtml = "";
+  const wb = wbState();
+  el.innerHTML = `
+    <div class="panel">
+      <div class="panel-title">🔬 Market Profile Workbench — <span class="accent">${esc(state.symbol)}</span>
+        <small>side-by-side sessions on one shared price axis · hover for detail · click a column for TPO letters</small></div>
+      <div class="wb-controls">
+        <span class="wb-group"><span class="wb-lbl">Days</span><span class="seg" id="wb-days">
+          ${[5, 10, 15, 20].map(d => `<button data-v="${d}" ${wb.days === d ? 'class="active"' : ""}>${d}</button>`).join("")}</span></span>
+        <span class="wb-group"><span class="wb-lbl">Session</span><span class="seg" id="wb-session">
+          <button data-v="rth" ${wb.session === "rth" ? 'class="active"' : ""}>RTH</button>
+          <button data-v="eth" ${wb.session === "eth" ? 'class="active"' : ""}>Globex</button>
+          <button data-v="all" ${wb.session === "all" ? 'class="active"' : ""}>24h</button></span></span>
+        <span class="wb-group"><span class="wb-lbl">Mode</span><span class="seg" id="wb-mode">
+          <button data-v="tpo" ${wb.mode === "tpo" ? 'class="active"' : ""}>TPO</button>
+          <button data-v="vol" ${wb.mode === "vol" ? 'class="active"' : ""}>Volume</button></span></span>
+        <span class="wb-group"><span class="wb-lbl">Value</span><span class="seg" id="wb-va">
+          ${[68, 70, 80].map(v => `<button data-v="${v}" ${wb.va === v ? 'class="active"' : ""}>${v}%</button>`).join("")}</span></span>
+        <span class="wb-group"><span class="wb-lbl">Overlays</span><span class="seg" id="wb-show">
+          ${[["trail", "POC trail"], ["vaBand", "VA band"], ["ib", "IB"], ["oc", "O/C"], ["singles", "Singles"], ["naked", "Naked POC"]]
+            .map(([k, l]) => `<button data-v="${k}" ${wb.show[k] ? 'class="active"' : ""}>${l}</button>`).join("")}</span></span>
+        <span class="wb-group"><span class="wb-lbl">Day type</span><span class="seg" id="wb-type">
+          <button data-v="" ${!wb.typeFilter ? 'class="active"' : ""}>all</button>
+          ${["trend", "normal", "neutral", "balanced", "P-shape", "b-shape"].map(t =>
+            `<button data-v="${t}" ${wb.typeFilter === t ? 'class="active"' : ""}>${t}</button>`).join("")}</span></span>
+      </div>
+      <div id="wb-canvas-wrap" style="position:relative">
+        <canvas id="wb-canvas" height="600"></canvas>
+        <div id="wb-tip" class="wb-tip"></div>
+        <div id="wb-status" class="loading">Building ${wb.days} ${wb.session.toUpperCase()} sessions…</div>
+      </div>
+      <div class="legend small muted" id="wb-legend"></div>
+    </div>
+    <div id="wb-stats"></div>
+    <div id="wb-drill"></div>
+    <div id="wb-context"></div>`;
+  wireWorkbenchControls();
+  fetchWorkbench();
+  loadProfileContext();
+}
+
+function wireWorkbenchControls() {
+  const wb = wbState();
+  const wire = (id, fn, multi = false) => $$(`#${id} button`).forEach(b => b.onclick = () => {
+    if (!multi) $$(`#${id} button`).forEach(x => x.classList.toggle("active", x === b));
+    else b.classList.toggle("active");
+    fn(b);
+  });
+  wire("wb-days", b => { wb.days = parseInt(b.dataset.v, 10); fetchWorkbench(); });
+  wire("wb-session", b => { wb.session = b.dataset.v; fetchWorkbench(); });
+  wire("wb-mode", b => { wb.mode = b.dataset.v; drawWorkbench(); });
+  wire("wb-va", b => { wb.va = parseInt(b.dataset.v, 10); fetchWorkbench(); });
+  wire("wb-show", b => { wb.show[b.dataset.v] = !wb.show[b.dataset.v]; drawWorkbench(); }, true);
+  wire("wb-type", b => { wb.typeFilter = b.dataset.v; drawWorkbench(); renderWbStats(); });
+}
+
+async function fetchWorkbench() {
+  const wb = wbState();
+  const st = $("#wb-status");
+  if (st) { st.style.display = ""; st.textContent = `Building ${wb.days} ${wb.session.toUpperCase()} sessions…`; }
   try {
-    const c = await api(`/composite/${state.symbol}?days=${compDays || 10}`);
-    if (c.ok) {
-      const cp = c.composite;
-      const max = Math.max(...cp.levels.map(l => l.volume), 1);
-      const bars = [...cp.levels].reverse().map(l => {
-        const k = l.price === cp.poc ? "vpoc" : cp.hvn.some(p => Math.abs(p - l.price) < 1e-9) ? "hvn"
-                : cp.lvn.some(p => Math.abs(p - l.price) < 1e-9) ? "lvn" : "";
-        const mark = l.price === cp.poc ? " ◀cPOC" : l.price === cp.vah ? " ◀cVAH" : l.price === cp.val ? " ◀cVAL" : "";
-        return `<div class="vp-row ${k}"><span class="p">${fmt(l.price, 4)}${mark}</span>
-          <div class="bar" style="width:${Math.max(1, l.volume / max * 100)}%"></div></div>`;
-      }).join("");
-      const mig = c.sessions.slice().reverse().map(s => `
-        <tr><td class="num">${esc(s.day)}</td>
-        <td>${esc(s.day_type)}${s.poor_high ? " ⚑ph" : ""}${s.poor_low ? " ⚑pl" : ""}</td>
-        <td class="num">${fmt(s.poc, 2)}</td>
-        <td class="num muted">${fmt(s.val, 2)}–${fmt(s.vah, 2)}</td>
-        <td class="num">${fmt(s.close, 2)}</td>
-        <td>${s.relation ? `<span class="rel ${esc(s.relation)}">${esc(s.relation_label)}</span>` : "<span class='muted'>—</span>"}</td></tr>`).join("");
-      const magnet = (list, kind) => list.map(x => `
-        <tr><td>${esc(kind === "npoc" ? "Naked POC" : kind === "gap" ? `Unfilled gap (${x.side})` : x.kind)}</td>
-        <td class="num">${kind === "gap" ? `${fmt(x.from, 2)}–${fmt(x.to, 2)}` : fmt(x.price, 2)}</td>
-        <td class="num muted">${esc(x.day)}</td>
-        <td class="num ${cls(-x.distance)}">${sign(-x.distance)}${fmt(-x.distance, 2)} away</td></tr>`).join("");
-      const magnets = magnet(c.naked_pocs, "npoc") + magnet(c.unfilled_gaps, "gap") + magnet(c.untested_extremes, "ext");
-      compHtml = `
-        <div class="panel"><div class="panel-title">📈 Value Migration — last ${c.days_used} sessions
-          <span class="seg" id="comp-days">
-            <button data-d="5" ${(compDays || 10) == 5 ? 'class="active"' : ""}>5d</button>
-            <button data-d="10" ${(compDays || 10) == 10 ? 'class="active"' : ""}>10d</button>
-            <button data-d="20" ${(compDays || 10) == 20 ? 'class="active"' : ""}>20d</button>
-          </span></div>
-          <p class="small" style="color:${c.value_trend.direction === "up" ? "var(--green)" : c.value_trend.direction === "down" ? "var(--red)" : "var(--amber)"}">
-          <b>${esc(c.value_trend.note)}</b></p>
-          <table class="mt8"><tr><th>Session</th><th>Day type</th><th>POC</th><th>Value area</th><th>Close</th><th>Relation vs prior</th></tr>${mig}</table>
-          <p class="mt8 muted small">${esc(c.explainers.migration)}</p></div>
-        <div class="grid2">
-          <div class="panel"><div class="panel-title">${c.days_used}-Day Composite Profile
-            <small>cPOC ${fmt(cp.poc, 2)} · cVA ${fmt(cp.val, 2)}–${fmt(cp.vah, 2)} · last ${fmt(c.last, 2)}</small></div>
-            <div style="max-height:520px;overflow-y:auto">${bars}</div>
-            <p class="mt8 muted small">${esc(c.explainers.composite)}</p></div>
-          <div class="panel"><div class="panel-title">🧲 Magnets &amp; Unfinished Business <small>what the market still owes</small></div>
-            ${magnets ? `<table><tr><th>What</th><th>Price</th><th>From</th><th>Distance</th></tr>${magnets}</table>`
-                      : `<p class="muted small">Nothing untested nearby — the market has cleaned up its business. Lean on the composite zones.</p>`}
-            <p class="mt8 muted small">${esc(c.explainers.naked_poc)}</p></div>
-        </div>`;
-    } else {
-      compHtml = `<div class="panel">${errBox("Composite unavailable: " + (c.error || ""), "Needs 30-min history — retry if rate-limited.")}</div>`;
+    const d = await api(`/profile-advanced/${state.symbol}?days=${wb.days}&session=${wb.session}&va=${wb.va}`);
+    if (!d.ok) throw new Error(d.error || "workbench unavailable");
+    wb.data = d;
+    if (st) st.style.display = "none";
+    drawWorkbench();
+    renderWbStats();
+    const lg = $("#wb-legend");
+    if (lg) lg.innerHTML = `<span class="lg" style="background:${WB_COLORS.bar}"></span> outside value
+      <span class="lg" style="background:${WB_COLORS.va}"></span> value area
+      <span class="lg" style="background:${WB_COLORS.poc}"></span> POC
+      <span class="lg" style="background:${WB_COLORS.single}"></span> single prints / IB
+      &nbsp;·&nbsp; ${esc(d.legend.modes)} ${esc(d.legend.naked)}`;
+  } catch (e) {
+    if (st) { st.style.display = ""; st.innerHTML = errBox("Workbench failed: " + e.message, "Needs intraday history — retry if the free feed is rate-limited."); }
+  }
+}
+
+function wbVisibleSessions() {
+  const wb = wbState();
+  if (!wb.data) return [];
+  return wb.data.sessions.filter(s => !wb.typeFilter || s.day_type === wb.typeFilter);
+}
+
+function drawWorkbench() {
+  const wb = wbState();
+  const cv = $("#wb-canvas");
+  if (!cv || !wb.data) return;
+  const d = wb.data;
+  const sessions = wbVisibleSessions();
+  const ctx = cv.getContext("2d");
+  const W = cv.width = cv.clientWidth || 1200;
+  const H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!sessions.length) {
+    ctx.fillStyle = WB_COLORS.text; ctx.font = "13px JetBrains Mono";
+    ctx.fillText("no sessions match the day-type filter", 20, 50);
+    return;
+  }
+  const grid = d.grid, n = grid.length, step = d.step;
+  const padL = 74, padR = 8, padT = 16, padB = 44;
+  const nCols = sessions.length + 1;                       // +1 composite
+  const colW = (W - padL - padR) / nCols;
+  const yOf = p => padT + (1 - (p - grid[0]) / (grid[n - 1] - grid[0])) * (H - padT - padB);
+  const rowH = Math.max(1, (H - padT - padB) / n);
+
+  // price axis + gridlines
+  ctx.font = "10px JetBrains Mono"; ctx.fillStyle = WB_COLORS.text;
+  const nLabels = 14;
+  for (let i = 0; i <= nLabels; i++) {
+    const p = grid[0] + (grid[n - 1] - grid[0]) * i / nLabels;
+    const y = yOf(p);
+    ctx.strokeStyle = WB_COLORS.grid; ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+    ctx.fillText(fmt(p, 2), 4, y + 3);
+  }
+  // last price line
+  ctx.strokeStyle = "#38bdf8"; ctx.setLineDash([5, 4]); ctx.beginPath();
+  ctx.moveTo(padL, yOf(d.last)); ctx.lineTo(W - padR, yOf(d.last)); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = "#38bdf8"; ctx.fillText(fmt(d.last, 2), W - padR - 56, yOf(d.last) - 4);
+
+  const series = s => wb.mode === "vol" ? s.vol : s.tpo;
+  const trail = [];
+  sessions.forEach((s, si) => {
+    const x0 = padL + si * colW + 3;
+    const usable = colW - 10;
+    const arr = series(s);
+    const maxV = Math.max(...arr, 1);
+    // value band
+    if (wb.show.vaBand) {
+      ctx.fillStyle = "rgba(61,122,181,.10)";
+      ctx.fillRect(x0 - 2, yOf(grid[s.vah_i]) - rowH / 2, colW - 6, yOf(grid[s.val_i]) - yOf(grid[s.vah_i]) + rowH);
     }
-  } catch (e) { compHtml = `<div class="panel">${errBox("Composite failed: " + e.message)}</div>`; }
-  let singleHtml = "";
+    for (let i = s.lo_i; i <= s.hi_i; i++) {
+      if (!arr[i]) continue;
+      const w = Math.max(1.5, arr[i] / maxV * usable);
+      const y = yOf(grid[i]);
+      ctx.fillStyle = i === s.poc_i ? WB_COLORS.poc
+        : (wb.show.singles && s.singles_i.includes(i)) ? WB_COLORS.single
+        : (i >= s.val_i && i <= s.vah_i) ? WB_COLORS.va : WB_COLORS.bar;
+      ctx.fillRect(x0, y - rowH / 2 + 0.5, w, Math.max(1, rowH - 1));
+    }
+    // IB bracket
+    if (wb.show.ib) {
+      ctx.strokeStyle = WB_COLORS.ib; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x0 - 2, yOf(s.ib_hi)); ctx.lineTo(x0 - 2, yOf(s.ib_lo)); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+    // open / close markers
+    if (wb.show.oc) {
+      ctx.fillStyle = "#34d399";
+      ctx.beginPath(); ctx.moveTo(x0 - 1, yOf(s.open)); ctx.lineTo(x0 + 5, yOf(s.open) - 3); ctx.lineTo(x0 + 5, yOf(s.open) + 3); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(x0 + usable - 6, yOf(s.close) - 1, 8, 2);
+    }
+    // poor extremes flags
+    ctx.fillStyle = "#fb5d6c"; ctx.font = "10px JetBrains Mono";
+    if (s.poor_high) ctx.fillText("⚑", x0 + usable / 2, yOf(s.high) - 4);
+    if (s.poor_low) ctx.fillText("⚑", x0 + usable / 2, yOf(s.low) + 11);
+    // naked POC ray
+    if (wb.show.naked && s.naked) {
+      ctx.strokeStyle = WB_COLORS.naked; ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.moveTo(x0, yOf(s.poc_price)); ctx.lineTo(W - padR, yOf(s.poc_price)); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    trail.push([x0 + usable / 2, yOf(grid[s.poc_i])]);
+    // labels
+    ctx.fillStyle = WB_COLORS.text; ctx.font = "9.5px JetBrains Mono";
+    ctx.fillText(s.day.slice(5), x0, H - padB + 14);
+    ctx.fillStyle = s.day_type === "trend" ? "#34d399" : s.day_type.includes("shape") ? "#fbbf24" : WB_COLORS.text;
+    ctx.fillText(s.day_type.slice(0, 7), x0, H - padB + 26);
+    ctx.fillStyle = s.rf > 0 ? "#34d399" : s.rf < 0 ? "#fb5d6c" : WB_COLORS.text;
+    ctx.fillText(`RF${s.rf > 0 ? "+" : ""}${s.rf}`, x0, H - padB + 38);
+  });
+
+  // composite column
+  const comp = wb.mode === "vol" ? d.composite.vol : d.composite.tpo;
+  const x0 = padL + sessions.length * colW + 3;
+  const usable = colW - 10;
+  const maxC = Math.max(...comp, 1);
+  for (let i = 0; i < n; i++) {
+    if (!comp[i]) continue;
+    ctx.fillStyle = i === d.composite.poc_i ? WB_COLORS.poc
+      : (i >= d.composite.val_i && i <= d.composite.vah_i) ? "#7c5cad" : "#4a3a66";
+    ctx.fillRect(x0, yOf(grid[i]) - rowH / 2 + 0.5, Math.max(1.5, comp[i] / maxC * usable), Math.max(1, rowH - 1));
+  }
+  ctx.fillStyle = "#a78bfa"; ctx.font = "9.5px JetBrains Mono";
+  ctx.fillText("COMPOSITE", x0, H - padB + 14);
+  ctx.fillText(`${sessions.length}d merged`, x0, H - padB + 26);
+
+  // POC trail
+  if (wb.show.trail && trail.length > 1) {
+    ctx.strokeStyle = "rgba(251,191,36,.55)"; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    trail.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
+
+  wireWbHover(cv, {padL, padT, padB, colW, sessions, grid, rowH, yOf});
+}
+
+function wireWbHover(cv, geo) {
+  const wb = wbState();
+  const tip = $("#wb-tip");
+  cv.onmousemove = ev => {
+    const r = cv.getBoundingClientRect();
+    const x = ev.clientX - r.left, y = ev.clientY - r.top;
+    const si = Math.floor((x - geo.padL) / geo.colW);
+    if (si < 0 || si >= geo.sessions.length || y < geo.padT || y > cv.height - geo.padB) { tip.style.display = "none"; return; }
+    const s = geo.sessions[si];
+    const grid = geo.grid;
+    const frac = 1 - (y - geo.padT) / (cv.height - geo.padT - geo.padB);
+    const price = grid[0] + frac * (grid[grid.length - 1] - grid[0]);
+    const i = Math.max(0, Math.min(grid.length - 1, Math.round((price - grid[0]) / (grid[1] - grid[0]))));
+    tip.style.display = "block";
+    tip.style.left = Math.min(x + 14, r.width - 230) + "px";
+    tip.style.top = (y + 10) + "px";
+    tip.innerHTML = `<b>${esc(s.day)}</b> · ${esc(s.day_type)}<br>
+      price <b class="num">${fmt(grid[i], 4)}</b><br>
+      TPO ${s.tpo[i] || 0} · vol ${fmt(s.vol[i] || 0, 0)}<br>
+      VA ${fmt(grid[s.val_i], 2)}–${fmt(grid[s.vah_i], 2)} · POC ${fmt(s.poc_price, 2)}${s.naked ? " <span style='color:var(--amber)'>(naked)</span>" : ""}<br>
+      RF ${s.rf > 0 ? "+" : ""}${s.rf} · IB ${fmt(s.ib_pct * 100, 0)}% · close@${fmt(s.close_loc * 100, 0)}%`;
+  };
+  cv.onmouseleave = () => { tip.style.display = "none"; };
+  cv.onclick = ev => {
+    const r = cv.getBoundingClientRect();
+    const si = Math.floor((ev.clientX - r.left - geo.padL) / geo.colW);
+    if (si >= 0 && si < geo.sessions.length && wb.session === "rth") loadWbDrill(geo.sessions[si].day);
+  };
+}
+
+function renderWbStats() {
+  const wb = wbState();
+  const el = $("#wb-stats");
+  if (!el || !wb.data) return;
+  const sessions = wbVisibleSessions();
+  el.innerHTML = `<div class="panel"><div class="panel-title">Session Stats <small>RF = rotation factor · click a row (or canvas column) for TPO letters</small></div>
+    <div style="overflow-x:auto"><table>
+    <tr><th>Session</th><th>Type</th><th>Range</th><th>IB%</th><th>RF</th><th>Value width</th><th>Close loc</th><th>Volume</th><th>POC</th><th>Flags</th></tr>
+    ${sessions.slice().reverse().map(s => `
+      <tr data-day="${esc(s.day)}" style="cursor:pointer">
+      <td class="num">${esc(s.day)}</td><td>${esc(s.day_type)}</td>
+      <td class="num">${fmt(s.high - s.low, 2)}</td>
+      <td class="num">${fmt(s.ib_pct * 100, 0)}%</td>
+      <td class="num ${cls(s.rf)}">${s.rf > 0 ? "+" : ""}${s.rf}</td>
+      <td class="num">${fmt(s.value_width, 2)}</td>
+      <td class="num">${fmt(s.close_loc * 100, 0)}%</td>
+      <td class="num">${fmt(s.volume_total, 0)}</td>
+      <td class="num">${fmt(s.poc_price, 2)}${s.naked ? " <span class='badge fresh'>naked</span>" : ""}</td>
+      <td class="small">${[s.poor_high ? "poor-high" : "", s.poor_low ? "poor-low" : ""].filter(Boolean).join(", ")}</td></tr>`).join("")}
+    </table></div></div>`;
+  $$("tr[data-day]", el).forEach(row => row.onclick = () => {
+    if (wbState().session === "rth") loadWbDrill(row.dataset.day);
+  });
+}
+
+async function loadWbDrill(day) {
+  const el = $("#wb-drill");
+  el.innerHTML = `<div class="loading">Loading TPO letters for ${esc(day)}…</div>`;
   try {
-    const d = await api(`/profile/${state.symbol}${day ? `?day=${day}` : ""}`);
-    if (!d.ok) { el.innerHTML = compHtml + errBox("Session profile unavailable: " + (d.error || "")); wireProfileControls(); return; }
+    const d = await api(`/profile/${state.symbol}?day=${day}`);
+    if (!d.ok) throw new Error(d.error);
     const t = d.tpo;
-    const daySel = `<select id="profile-day">${d.available_days.map(x =>
-      `<option ${x === d.day ? "selected" : ""}>${x}</option>`).join("")}</select>`;
     const tpoRows = t.rows.map(r => {
       const isPoc = r.price === t.poc, inVa = r.price <= t.vah && r.price >= t.val;
       return `<div class="tpo-row ${isPoc ? "poc" : ""} ${inVa ? "va" : ""}">
         <span class="p">${fmt(r.price, 4)}${isPoc ? " ◀POC" : r.price === t.vah ? " ◀VAH" : r.price === t.val ? " ◀VAL" : ""}</span>
         <span class="l">${esc(r.letters)}</span></div>`;
     }).join("");
-    const vp = d.volume_profile;
-    let vpHtml = errBox(vp.error || "volume profile unavailable");
-    if (vp.ok) {
-      const max = Math.max(...vp.levels.map(l => l.volume), 1);
-      vpHtml = [...vp.levels].reverse().map(l => {
-        const k = l.price === vp.vpoc ? "vpoc" : vp.hvn.includes(l.price) ? "hvn" : vp.lvn.includes(l.price) ? "lvn" : "";
-        return `<div class="vp-row ${k}"><span class="p">${fmt(l.price, 4)}</span>
-          <div class="bar" style="width:${Math.max(1, l.volume / max * 100)}%"></div></div>`;
-      }).join("");
-    }
     const fa = t.failed_auction;
-    singleHtml = `
-      <div class="panel"><div class="panel-title">🔍 Single-Session Drill-Down ${daySel} — <span class="accent">${esc(state.symbol)}</span>
-        <small>O ${fmt(t.open,2)} · H ${fmt(t.high,2)} · L ${fmt(t.low,2)} · C ${fmt(t.close,2)} · IB ${fmt(t.ib_low,2)}–${fmt(t.ib_high,2)}</small></div>
-        <p><b>Day type: <span class="accent">${esc(t.day_type.type)}</span></b> <span class="muted small">(IB ${fmt(t.day_type.ib_pct_of_range*100,0)}% of range, close at ${fmt(t.day_type.close_location*100,0)}%)</span></p>
-        <p class="mt8 small">${esc(t.day_type.note)}</p>
-        ${t.poor_high ? `<p class="mt8 small" style="color:var(--amber)">⚑ Poor high at ${fmt(t.high,2)} — unfinished auction, magnet above (Day 7).</p>` : ""}
-        ${t.poor_low ? `<p class="mt8 small" style="color:var(--amber)">⚑ Poor low at ${fmt(t.low,2)} — unfinished auction, magnet below (Day 7).</p>` : ""}
+    el.innerHTML = `
+      <div class="panel"><div class="panel-title">🔍 ${esc(day)} — TPO Letters
+        <small>O ${fmt(t.open, 2)} · H ${fmt(t.high, 2)} · L ${fmt(t.low, 2)} · C ${fmt(t.close, 2)} · IB ${fmt(t.ib_low, 2)}–${fmt(t.ib_high, 2)}</small>
+        <button class="link" onclick="this.closest('.panel').remove()">close ✕</button></div>
+        <p class="small"><b>${esc(t.day_type.type)}</b> — ${esc(t.day_type.note)}</p>
         ${fa ? `<p class="mt8 small" style="color:var(--purple)">⚑ ${esc(fa.note)}</p>` : ""}
-        ${t.single_prints.length ? `<p class="mt8 muted small">Single prints: ${t.single_prints.map(p => fmt(p, 2)).join(", ")} — acceleration zones if revisited.</p>` : ""}</div>
-      <div class="grid2">
-        <div class="panel"><div class="panel-title">TPO / Market Profile <small>amber = POC · blue prices = value area</small></div>
-          <div class="tpo-wrap">${tpoRows}</div></div>
-        <div class="panel"><div class="panel-title">Volume Profile <small>${vp.ok ? `VPOC ${fmt(vp.vpoc,2)} · VA ${fmt(vp.val,2)}–${fmt(vp.vah,2)}` : ""}</small></div>
-          ${vpHtml}${vp.ok ? `<p class="mt8 muted small">${esc(vp.note)}</p>
-          <p class="mt8 small">HVN: ${vp.hvn.map(p=>fmt(p,2)).join(", ") || "—"}<br>LVN: ${vp.lvn.map(p=>fmt(p,2)).join(", ") || "—"}</p>` : ""}</div>
-      </div>
-      ${d.prior_tpo ? `<div class="panel"><div class="panel-title">Prior Session (${esc(d.prior_day)}) reference</div>
-        <p class="small num">POC ${fmt(d.prior_tpo.poc,2)} · VAH ${fmt(d.prior_tpo.vah,2)} · VAL ${fmt(d.prior_tpo.val,2)} · H ${fmt(d.prior_tpo.high,2)} · L ${fmt(d.prior_tpo.low,2)} — day type: ${esc(d.prior_tpo.day_type.type)}</p></div>` : ""}`;
-  } catch (e) { singleHtml = errBox("Session profile failed: " + e.message); }
-  el.innerHTML = compHtml + singleHtml;
-  wireProfileControls(compDays);
+        <div class="tpo-wrap mt8">${tpoRows}</div></div>`;
+    el.scrollIntoView({behavior: "smooth", block: "start"});
+  } catch (e) { el.innerHTML = errBox("Drill-down failed: " + e.message); }
 }
 
-function wireProfileControls(compDays) {
-  const ds = $("#profile-day");
-  if (ds) ds.onchange = e => loadProfile(e.target.value, compDays);
-  $$("#comp-days button").forEach(b => b.onclick = () => loadProfile(undefined, parseInt(b.dataset.d, 10)));
+async function loadProfileContext() {
+  const el = $("#wb-context");
+  try {
+    const c = await api(`/composite/${state.symbol}?days=10`);
+    if (!c.ok) { el.innerHTML = ""; return; }
+    const mig = c.sessions.slice().reverse().map(s => `
+      <tr><td class="num">${esc(s.day)}</td>
+      <td>${esc(s.day_type)}</td>
+      <td class="num">${fmt(s.poc, 2)}</td>
+      <td class="num muted">${fmt(s.val, 2)}–${fmt(s.vah, 2)}</td>
+      <td class="num">${fmt(s.close, 2)}</td>
+      <td>${s.relation ? `<span class="rel ${esc(s.relation)}">${esc(s.relation_label)}</span>` : "<span class='muted'>—</span>"}</td></tr>`).join("");
+    const magnet = (list, kind) => list.map(x => `
+      <tr><td>${esc(kind === "npoc" ? "Naked POC" : kind === "gap" ? `Unfilled gap (${x.side})` : x.kind)}</td>
+      <td class="num">${kind === "gap" ? `${fmt(x.from, 2)}–${fmt(x.to, 2)}` : fmt(x.price, 2)}</td>
+      <td class="num muted">${esc(x.day)}</td>
+      <td class="num ${cls(-x.distance)}">${sign(-x.distance)}${fmt(-x.distance, 2)} away</td></tr>`).join("");
+    const magnets = magnet(c.naked_pocs, "npoc") + magnet(c.unfilled_gaps, "gap") + magnet(c.untested_extremes, "ext");
+    el.innerHTML = `
+      <div class="grid2">
+        <div class="panel"><div class="panel-title">📈 Value Migration <small>the auction's trend, day over day</small></div>
+          <p class="small" style="color:${c.value_trend.direction === "up" ? "var(--green)" : c.value_trend.direction === "down" ? "var(--red)" : "var(--amber)"}">
+          <b>${esc(c.value_trend.note)}</b></p>
+          <table class="mt8"><tr><th>Session</th><th>Type</th><th>POC</th><th>Value</th><th>Close</th><th>Relation</th></tr>${mig}</table></div>
+        <div class="panel"><div class="panel-title">🧲 Magnets &amp; Unfinished Business</div>
+          ${magnets ? `<table><tr><th>What</th><th>Price</th><th>From</th><th>Distance</th></tr>${magnets}</table>`
+                    : `<p class="muted small">Nothing untested nearby — the market has cleaned up its business.</p>`}
+          <p class="mt8 muted small">${esc(c.explainers.naked_poc)}</p></div>
+      </div>`;
+  } catch (e) { el.innerHTML = ""; }
 }
 
 /* ---------- calendar ---------- */
