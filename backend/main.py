@@ -130,7 +130,7 @@ def rithmic_connect(body: dict = Body(...)):
     system = (body.get("system") or "").strip()
     if not user or not password or not system:
         return {"ok": False, "error": "user, password and system are all required"}
-    return guard(rithmic.connect, user, password, system)
+    return guard(rithmic.connect, user, password, system, body.get("gateway"))
 
 
 @app.post("/api/rithmic/disconnect")

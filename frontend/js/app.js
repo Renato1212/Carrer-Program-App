@@ -1562,6 +1562,9 @@ async function loadRithmic() {
           <div style="grid-column:1/-1"><label>Rithmic user</label><input id="rith-user" autocomplete="off"></div>
           <div style="grid-column:1/-1"><label>Password</label><input id="rith-pass" type="password" autocomplete="off"></div>
           <div style="grid-column:1/-1"><label>System</label><select id="rith-sys">${(s.systems || []).map(x => `<option>${esc(x)}</option>`).join("")}</select></div>
+          <div style="grid-column:1/-1"><label>Gateway region</label><select id="rith-gw">
+            ${Object.entries(s.gateways || {}).map(([n, u]) => `<option value="${esc(u)}">${esc(n)}</option>`).join("")}
+          </select></div>
         </div>
         <button class="primary mt8" id="rith-conn" style="width:100%">Connect</button>
         <p class="muted small mt8">Credentials are stored only on the machine running EdgeDesk (data/rithmic.json, never committed or sent anywhere except Rithmic). Once connected, live ticks replace delayed quotes — the first step toward full DOM, tick delta and order routing.</p>
@@ -1570,7 +1573,8 @@ async function loadRithmic() {
     if (btn) btn.onclick = async () => {
       btn.disabled = true; btn.textContent = "Connecting…";
       const r = await fetch("/api/rithmic/connect", {method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({user: $("#rith-user").value, password: $("#rith-pass").value, system: $("#rith-sys").value})});
+        body: JSON.stringify({user: $("#rith-user").value, password: $("#rith-pass").value,
+          system: $("#rith-sys").value, gateway: $("#rith-gw") ? $("#rith-gw").value : ""})});
       const j = await r.json();
       if (!j.ok) { body.insertAdjacentHTML("beforeend", errBox(j.error)); btn.disabled = false; btn.textContent = "Connect"; }
       else {
