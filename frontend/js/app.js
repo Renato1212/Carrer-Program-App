@@ -44,6 +44,8 @@ function initShell() {
     state.symbol = sel.value;
     localStorage.setItem("edgedesk.symbol", state.symbol);
     state.loaded = {};
+    const dp = $("#dom-panel");
+    if (dp) { delete dp.dataset.init; dp.innerHTML = `<div class="loading">Loading DOM…</div>`; }
     updateHeaderQuote();
     loadTab(state.tab, true);
   };
@@ -64,12 +66,13 @@ function initShell() {
 }
 
 function loadTab(tab, force = false) {
-  const symScoped = ["briefing", "board", "profile"];
+  const symScoped = ["briefing", "board", "profile", "trade"];
   const key = symScoped.includes(tab) ? `${tab}:${state.symbol}` : tab;
   if (!force && state.loaded[key]) return;
   state.loaded[key] = true;
   ({briefing: loadBriefing, board: loadBoard, profile: () => loadProfile(), calendar: loadCalendar,
-    news: loadNews, macro: loadMacro, playbooks: loadPlaybooks, journal: loadJournal}[tab])();
+    news: loadNews, macro: loadMacro, playbooks: loadPlaybooks, journal: loadJournal,
+    trade: loadTrade}[tab])();
 }
 
 function loadMacro() {
@@ -1327,6 +1330,202 @@ function drawEquity(curve) {
   ctx.fillStyle = grad; ctx.fill();
 }
 
+/* ---------- trade panel (DOM + simulated account) ---------- */
+let domBusy = false;
+
+function loadTrade() {
+  const panel = $("#dom-panel");
+  if (!panel.dataset.init) {
+    panel.dataset.init = "1";
+    panel.innerHTML = `
+      <div class="panel-title">DOM — <span class="accent">${esc(state.symbol)}</span>
+        <button class="info" data-info="A trading ladder for execution practice. The PRICE is real (anchored to the live/delayed quote); the resting bid/ask sizes are SIMULATED with realistic behavior — icebergs that refill, large orders that get pulled, stop-runs through session extremes — so you can train DOM reading and order placement. Click a blue bid cell to place a buy (limit below price, stop above); click a red ask cell to place a sell. Fills, brackets and P&L run on a simulated 100k account and closed trades flow into your Journal automatically.">i</button>
+        <small id="dom-src"></small></div>
+      <div class="dom-controls">
+        <div><label>Qty</label><input id="dom-qty" type="number" value="1" min="1" max="50"></div>
+        <div><label>Stop (ticks)</label><input id="dom-sl" type="number" value="16" min="0"></div>
+        <div><label>Target (ticks)</label><input id="dom-tp" type="number" value="32" min="0"></div>
+        <button class="btn-buy" id="dom-mb">Buy Mkt</button>
+        <button class="btn-sell" id="dom-ms">Sell Mkt</button>
+        <button class="btn-flat" id="dom-fl">Flatten</button>
+      </div>
+      <div id="dom-ladder" style="max-height:640px;overflow-y:auto"><div class="loading">Connecting…</div></div>`;
+    $("#dom-mb").onclick = () => placePaperOrder("buy", "market", null);
+    $("#dom-ms").onclick = () => placePaperOrder("sell", "market", null);
+    $("#dom-fl").onclick = async () => {
+      await fetch("/api/paper/flatten", {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({symbol: state.symbol})});
+      pollDom(); loadPaperDash();
+    };
+  }
+  $("#dom-panel .panel-title .accent").textContent = state.symbol;
+  pollDom();
+  loadPaperDash();
+}
+
+async function pollDom() {
+  if (domBusy || state.tab !== "trade") return;
+  domBusy = true;
+  try {
+    const d = await api(`/dom/${state.symbol}`);
+    if (!d.ok) { $("#dom-ladder").innerHTML = errBox(d.error || "DOM unavailable"); return; }
+    state.dom = d;
+    renderLadder(d);
+    renderDomAccount(d);
+    renderDomSide(d);
+  } catch (e) { /* transient */ }
+  finally { domBusy = false; }
+}
+
+function renderLadder(d) {
+  const acct = d.account || {};
+  const myByPrice = {};
+  (acct.open_orders || []).forEach(o => {
+    const k = Number(o.price).toFixed(6);
+    (myByPrice[k] = myByPrice[k] || []).push(o);
+  });
+  const maxVol = Math.max(...d.ladder.map(l => l.vol), 1);
+  const dp = d.tick < 0.01 ? 5 : d.tick < 1 ? 2 : 0;
+  const rows = d.ladder.map(l => {
+    const isLast = Math.abs(l.price - d.last) < d.tick / 2;
+    const isPos = acct.position && acct.avg_price && Math.abs(l.price - acct.avg_price) < d.tick / 2;
+    const mine = myByPrice[Number(l.price).toFixed(6)] || [];
+    const myBuy = mine.filter(o => o.side === "buy");
+    const mySell = mine.filter(o => o.side === "sell");
+    const myCell = arr => arr.length
+      ? `<td class="d-my" data-cancel="${arr[0].id}" title="click to cancel">${arr.reduce((s, o) => s + o.qty, 0)}${arr[0].otype === "stop" ? "s" : ""}</td>`
+      : `<td class="d-my"></td>`;
+    return `<tr class="${isLast ? "d-last" : ""} ${isPos ? "d-pos" : ""} ${l.ice ? "d-ice" : ""}">
+      ${myCell(myBuy)}
+      <td class="d-bid" data-side="buy" data-price="${l.price}">${l.bid || ""}</td>
+      <td class="d-price"><div class="d-volbar" style="width:${l.vol / maxVol * 100}%"></div><span>${fmt(l.price, dp)}</span></td>
+      <td class="d-ask" data-side="sell" data-price="${l.price}">${l.ask || ""}</td>
+      ${myCell(mySell)}
+    </tr>`;
+  }).join("");
+  $("#dom-ladder").innerHTML = `<table class="dom-table">
+    <tr><th style="width:46px">B-ord</th><th>Bids</th><th>Price · vol</th><th>Asks</th><th style="width:46px">S-ord</th></tr>
+    ${rows}</table>`;
+  $("#dom-src").textContent = `${d.source}${d.simulated_book ? " · book simulated (training)" : ""}`;
+  $$("#dom-ladder .d-bid, #dom-ladder .d-ask").forEach(td => td.onclick = () => {
+    const price = parseFloat(td.dataset.price);
+    const side = td.dataset.side;
+    const last = state.dom.last;
+    let otype = "limit";
+    if (side === "buy" && price > last) otype = "stop";
+    if (side === "sell" && price < last) otype = "stop";
+    placePaperOrder(side, otype, price);
+  });
+  $$("#dom-ladder [data-cancel]").forEach(td => td.onclick = async () => {
+    await fetch(`/api/paper/cancel/${td.dataset.cancel}`, {method: "POST"});
+    pollDom();
+  });
+}
+
+async function placePaperOrder(side, otype, price) {
+  const qty = parseInt($("#dom-qty").value, 10) || 1;
+  const slT = parseInt($("#dom-sl").value, 10) || 0;
+  const tpT = parseInt($("#dom-tp").value, 10) || 0;
+  const tick = state.dom ? state.dom.tick : 0.25;
+  const ref = price != null ? price : (state.dom ? state.dom.last : null);
+  const dir = side === "buy" ? 1 : -1;
+  const body = {symbol: state.symbol, side, qty, otype, price};
+  if (ref != null && slT > 0) body.stop_loss = ref - dir * slT * tick;
+  if (ref != null && tpT > 0) body.take_profit = ref + dir * tpT * tick;
+  const r = await fetch("/api/paper/order", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (!j.ok) showToast({kind: "headline", id: "ord" + Date.now(), text: "Order rejected: " + (j.error || "")});
+  pollDom();
+}
+
+function renderDomAccount(d) {
+  const a = d.account || {};
+  $("#dom-acct").innerHTML = `
+    <div class="panel-title">Simulated Account
+      <button class="info" data-info="A 100k practice account. Position size, stops and targets behave like real bracket orders: the entry activates an OCO pair (one cancels the other). Every closed round-trip is logged into your Journal tagged sim-dom, so your practice shows up in your real performance review. On the shared web deployment the account resets periodically — run locally or on Render for persistence.">i</button></div>
+    <div class="acct-strip">
+      <span>Equity <b class="${cls(a.equity - 100000)}">$${fmt(a.equity)}</b></span>
+      <span>Open P&L <b class="${cls(a.unrealized)}">${sign(a.unrealized)}$${fmt(Math.abs(a.unrealized))}</b></span>
+      <span>Realized <b class="${cls(a.realized)}">${sign(a.realized)}$${fmt(Math.abs(a.realized))}</b></span>
+    </div>
+    <div class="small">Position: <b class="num ${cls(a.position)}">${a.position > 0 ? "+" : ""}${a.position || 0}</b>
+      ${a.position ? `@ <span class="num">${fmt(a.avg_price, 2)}</span>` : "(flat)"}
+      · open orders: ${(a.open_orders || []).length}</div>`;
+}
+
+function renderDomSide(d) {
+  const sigs = (d.signals || []).slice(0, 6).map(s =>
+    `<div class="sig-item ${esc(s.kind)}">${esc(s.text)}</div>`).join("");
+  const tape = (d.tape || []).map(t =>
+    `<div class="tape-row ${esc(t.side)}"><span>${fmt(t.price, 2)}</span><span>×${t.size}</span></div>`).join("");
+  $("#dom-side").innerHTML = `
+    <div class="panel-title">Flow Analytics
+      <button class="info" data-info="Cumulative delta = net aggressive buying minus selling on this tape. Cancel ratio = how much resting size gets pulled vs added (high values = spoofy, untrustworthy book). The signal feed flags icebergs (size that refills after every hit = a large passive player), big cancellations, and stop-runs through session extremes — the three order-flow events that matter most at a level.">i</button></div>
+    <div class="small num">Δ cum <b class="${cls(d.cum_delta)}">${sign(d.cum_delta)}${fmt(d.cum_delta, 0)}</b>
+      · cancel ratio <b>${fmt(d.cancel_ratio, 2)}</b>
+      · POC <b>${fmt(d.poc, 2)}</b></div>
+    <canvas id="dom-delta" height="56"></canvas>
+    <div class="mt8"><b class="small">Signal feed</b>${sigs || "<p class='muted small'>watching the book…</p>"}</div>
+    <div class="mt8"><b class="small">Tape</b><div style="max-height:170px;overflow-y:auto">${tape}</div></div>
+    <p class="muted small mt8">${esc(d.note)}</p>`;
+  if ((d.delta_hist || []).length > 2)
+    drawLineChart("dom-delta", [{color: d.cum_delta >= 0 ? "#30d158" : "#ff453a",
+      points: d.delta_hist.map((v, i) => ({t: i, v}))}]);
+}
+
+async function loadPaperDash() {
+  const el = $("#paper-dash");
+  try {
+    const d = await api("/paper/dashboard");
+    if (!d.ok) { el.innerHTML = ""; return; }
+    if (!d.count) {
+      el.innerHTML = `<div class="panel"><p class="muted small">${esc(d.note || "No sim trades yet.")}</p></div>`;
+      return;
+    }
+    el.innerHTML = `
+      <div class="kpi-row">
+        <div class="kpi"><div class="v ${cls(d.net_pnl)}">$${fmt(d.net_pnl)}</div><div class="k">Sim net P&L (${d.count} round-trips)</div></div>
+        <div class="kpi"><div class="v">$${fmt(d.balance)}</div><div class="k">Balance</div></div>
+        <div class="kpi"><div class="v">${fmt(d.win_rate, 1)}%</div><div class="k">Win rate</div></div>
+        <div class="kpi"><div class="v">${fmt(d.profit_factor)}</div><div class="k">Profit factor</div></div>
+        <div class="kpi"><div class="v up">$${fmt(d.avg_win)}</div><div class="k">Avg win</div></div>
+        <div class="kpi"><div class="v down">$${fmt(d.avg_loss)}</div><div class="k">Avg loss</div></div>
+      </div>
+      <div class="grid2">
+        <div class="panel"><div class="panel-title">Sim Equity Curve</div><canvas id="paper-eq" height="170"></canvas>
+          <button class="danger-link mt8" id="paper-reset">reset simulated account</button></div>
+        <div class="panel"><div class="panel-title">Recent Round-Trips <small>also logged in Journal as sim-dom</small></div>
+          <div style="max-height:230px;overflow-y:auto"><table>
+          <tr><th>Time</th><th>Sym</th><th>Side</th><th>Qty</th><th>Entry→Exit</th><th>P&L</th></tr>
+          ${d.recent.map(t => `<tr><td class="num small">${esc(t.ts.slice(5, 16))}</td><td><b>${esc(t.symbol)}</b></td>
+            <td class="${t.side === "long" ? "up" : "down"}">${esc(t.side)}</td><td class="num">${t.qty}</td>
+            <td class="num">${fmt(t.entry, 2)} → ${fmt(t.exit, 2)}</td>
+            <td class="num ${cls(t.pnl)}">$${fmt(t.pnl)}</td></tr>`).join("")}</table></div></div>
+      </div>`;
+    drawEquity(d.equity_curve);
+    const eqCv = $("#paper-eq");
+    if (eqCv) {
+      const {ctx, W, H} = hiDPI(eqCv);
+      const vals = d.equity_curve.map(c => c.equity);
+      const min = Math.min(...vals), max = Math.max(...vals), span = (max - min) || 1;
+      ctx.strokeStyle = d.net_pnl >= 0 ? "#30d158" : "#ff453a"; ctx.lineWidth = 2; ctx.beginPath();
+      vals.forEach((v, i) => {
+        const x = 8 + i / Math.max(vals.length - 1, 1) * (W - 16);
+        const y = 8 + (1 - (v - min) / span) * (H - 16);
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
+      ctx.stroke();
+    }
+    const rb = $("#paper-reset");
+    if (rb) rb.onclick = async () => {
+      if (!confirm("Reset the simulated account? All sim round-trips are wiped (journal copies stay).")) return;
+      await fetch("/api/paper/reset", {method: "POST"});
+      loadPaperDash(); pollDom();
+    };
+  } catch (e) { /* best effort */ }
+}
+
 /* ---------- rithmic connection ---------- */
 async function loadRithmic() {
   const body = $("#rithmic-body");
@@ -1448,4 +1647,6 @@ setTimeout(() => {
 }, 3500);
 setInterval(pollAlerts, 30000);
 setInterval(() => { if (state.tab === "board") { loadBoard(); } }, 15000);
+setInterval(() => { if (state.tab === "trade") pollDom(); }, 1500);
+setInterval(() => { if (state.tab === "trade") loadPaperDash(); }, 12000);
 setInterval(() => { if (state.tab === "news") loadNews(true); }, 45000);

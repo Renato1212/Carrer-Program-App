@@ -17,9 +17,9 @@ import time as _time
 
 from backend.services import (briefing, central_banks, composite, correlations,
                               econ_calendar, fedwatch, flow, gameplan, journal,
-                              levels, market_data, news, orderflow, patterns,
-                              playbooks, predictions, profile, profile_adv,
-                              rithmic, sentiment)
+                              levels, market_data, news, orderflow, paper,
+                              patterns, playbooks, predictions, profile,
+                              profile_adv, rithmic, sentiment, simbook)
 
 app = FastAPI(title="EdgeDesk", version="1.1",
               description="Free-data command center for futures day traders")
@@ -186,6 +186,50 @@ def get_briefing(symbol: str = "ES"):
 @app.get("/api/playbooks")
 def get_playbooks():
     return guard(playbooks.get_playbooks)
+
+
+# ----- DOM / simulated trading -----
+@app.get("/api/dom/{symbol}")
+def dom_snapshot(symbol: str):
+    def build():
+        snap = simbook.step(symbol.upper())
+        if not snap.get("ok"):
+            return snap
+        paper.process(symbol.upper(), snap["last"], snap["bid"], snap["ask"])
+        snap["account"] = paper.account(symbol.upper(), snap["last"])
+        return snap
+    return guard(build)
+
+
+@app.post("/api/paper/order")
+def paper_order(body: dict = Body(...)):
+    return guard(paper.place_order, body.get("symbol", "ES"), body.get("side", ""),
+                 body.get("qty", 1), body.get("otype", "market"), body.get("price"),
+                 body.get("stop_loss"), body.get("take_profit"))
+
+
+@app.post("/api/paper/cancel/{order_id}")
+def paper_cancel(order_id: int):
+    return guard(paper.cancel_order, order_id)
+
+
+@app.post("/api/paper/flatten")
+def paper_flatten(body: dict = Body(...)):
+    sym = (body.get("symbol") or "ES").upper()
+    def run():
+        snap = simbook.step(sym)
+        return paper.flatten(sym, snap.get("last") or 0)
+    return guard(run)
+
+
+@app.get("/api/paper/dashboard")
+def paper_dashboard():
+    return guard(paper.dashboard)
+
+
+@app.post("/api/paper/reset")
+def paper_reset():
+    return guard(paper.reset_account)
 
 
 # ----- journal -----

@@ -24,6 +24,7 @@
 <nav id="tabs">
   <button data-tab="briefing" class="active">Today</button>
   <button data-tab="board">Markets</button>
+  <button data-tab="trade">Trade</button>
   <button data-tab="profile">Profile</button>
   <button data-tab="news">News</button>
   <button data-tab="calendar">Calendar</button>
@@ -87,6 +88,17 @@
       <canvas id="relvol-canvas" height="150"></canvas>
       <div class="legend small muted"><span class="lg lg-avg"></span> 20-day average <span class="lg lg-today"></span> today (green = above average)</div>
     </div>
+  </section>
+
+  <section id="tab-trade" class="tab">
+    <div class="trade-grid">
+      <div class="panel" id="dom-panel"><div class="loading">Loading DOM…</div></div>
+      <div class="side-col">
+        <div class="panel" id="dom-acct"></div>
+        <div class="panel" id="dom-side"></div>
+      </div>
+    </div>
+    <div id="paper-dash"></div>
   </section>
 
   <section id="tab-profile" class="tab"><div class="skeleton-page"></div></section>
