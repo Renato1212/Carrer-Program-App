@@ -1331,6 +1331,13 @@ function drawEquity(curve) {
 async function loadRithmic() {
   const body = $("#rithmic-body");
   if (!body) return;
+  // Never clobber the credentials form while the user is interacting with it:
+  // the Markets tab auto-refreshes every 15s and a re-render would collapse
+  // the form and wipe whatever was typed.
+  const det = body.querySelector("details");
+  const focusedInside = document.activeElement && body.contains(document.activeElement);
+  const typed = ["#rith-user", "#rith-pass"].some(sel => { const el = $(sel); return el && el.value; });
+  if (focusedInside || (det && det.open) || typed) return;
   try {
     const s = await api("/rithmic/status");
     if (s.connected) {
@@ -1367,7 +1374,16 @@ async function loadRithmic() {
         body: JSON.stringify({user: $("#rith-user").value, password: $("#rith-pass").value, system: $("#rith-sys").value})});
       const j = await r.json();
       if (!j.ok) { body.insertAdjacentHTML("beforeend", errBox(j.error)); btn.disabled = false; btn.textContent = "Connect"; }
-      else setTimeout(loadRithmic, 2500);
+      else {
+        // clear the submitted credentials and close the form so the
+        // interaction guard lets the next status poll re-render
+        $("#rith-user").value = "";
+        $("#rith-pass").value = "";
+        const dd = body.querySelector("details");
+        if (dd) dd.open = false;
+        if (document.activeElement) document.activeElement.blur();
+        setTimeout(loadRithmic, 2500);
+      }
     };
   } catch (e) { body.innerHTML = `<span class="muted small">status unavailable: ${esc(e.message)}</span>`; }
 }
