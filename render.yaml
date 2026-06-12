@@ -1,7 +1,6 @@
 # One-click always-on deployment (Render.com free tier).
-# Unlike serverless hosting, this keeps a persistent process running, which
-# enables the background warmer (fast responses), the intraday repricing
-# monitor, a persistent journal database, and live Rithmic connections
+# Persistent process = background warmer (fast loads), intraday repricing
+# monitor, persistent journal/sim account, and live Rithmic connections
 # directly from the web app - no local install needed.
 services:
   - type: web
@@ -11,3 +10,7 @@ services:
     buildCommand: pip install -r requirements.txt && (pip install async_rithmic || true)
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/playbooks
+    envVars:
+      # async_rithmic/protobuf needs <=3.12; Render's default 3.13 breaks the build
+      - key: PYTHON_VERSION
+        value: 3.12.7

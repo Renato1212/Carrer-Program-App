@@ -45,6 +45,8 @@ def _new_book(symbol: str, anchor: float) -> dict:
         "iceberg": None,                   # {"price", "side", "hidden", "shown"}
         "hi": anchor, "lo": anchor,
         "cancels": 0, "adds": 0,
+        "pv_sum": 0.0, "v_sum": 0.0,
+        "frames": 0,
         "rng": rng,
         "t0": time.time(),
     }
@@ -121,6 +123,8 @@ def step(symbol: str) -> dict:
                         b["iceberg"] = None
                 b["trades"].append({"ts": time.time(), "price": p, "size": size, "side": side})
                 b["vp"][p] = b["vp"].get(p, 0) + size
+                b["pv_sum"] += p * size
+                b["v_sum"] += size
                 frame_delta += size if side == "buy" else -size
         del b["trades"][:-60]
         b["cum_delta"] += frame_delta
@@ -131,10 +135,12 @@ def step(symbol: str) -> dict:
         b["lo"] = min(b["lo"], new_last)
 
         # ---- stop-run detection: burst through session extreme ----
-        if new_last > prev_hi + tick and move >= 2:
+        b["frames"] += 1
+        warm = b["frames"] > 10            # skip while converging to the anchor at startup
+        if warm and new_last > prev_hi + tick and move >= 2:
             _signal(b, "stop-run", f"Buy-side burst through {prev_hi:g} - resting buy stops above the "
                                    "session high just triggered. Watch for follow-through vs snap-back.")
-        if new_last < prev_lo - tick and move <= -2:
+        if warm and new_last < prev_lo - tick and move <= -2:
             _signal(b, "stop-run", f"Sell-side burst through {prev_lo:g} - sell stops below the session "
                                    "low triggered. The first seconds decide: real break or stop-run trap.")
 
@@ -197,6 +203,10 @@ def step(symbol: str) -> dict:
                 "vol": int(b["vp"].get(p, 0)),
                 "ice": bool(ice and abs(p - ice["price"]) < tick / 2),
             })
+        sum_bid = sum(l for l in (
+            _size_at(b, _round_tick(new_last - i * tick, tick), "bid") for i in range(1, LEVELS + 1)))
+        sum_ask = sum(l for l in (
+            _size_at(b, _round_tick(new_last + i * tick, tick), "ask") for i in range(1, LEVELS + 1)))
         total = b["adds"] + b["cancels"] or 1
         vp_sorted = sorted(b["vp"].items(), key=lambda kv: -kv[1])
         step_n = max(1, len(b["delta_hist"]) // 60)
@@ -211,6 +221,8 @@ def step(symbol: str) -> dict:
             "cum_delta": b["cum_delta"],
             "delta_hist": b["delta_hist"][::step_n],
             "cancel_ratio": round(b["cancels"] / total, 2),
+            "vwap": round(b["pv_sum"] / b["v_sum"], 4) if b["v_sum"] else None,
+            "imbalance": round(sum_bid / (sum_bid + sum_ask) * 100, 1) if (sum_bid + sum_ask) else 50.0,
             "poc": vp_sorted[0][0] if vp_sorted else None,
             "signals": list(reversed(b["signals"])),
             "note": ("Prices anchored to the real market"

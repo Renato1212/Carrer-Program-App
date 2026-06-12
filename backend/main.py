@@ -218,7 +218,9 @@ def paper_flatten(body: dict = Body(...)):
     sym = (body.get("symbol") or "ES").upper()
     def run():
         snap = simbook.step(sym)
-        return paper.flatten(sym, snap.get("last") or 0)
+        if not snap.get("ok") or not snap.get("last"):
+            return {"ok": False, "error": "no market price available - cannot flatten safely right now"}
+        return paper.flatten(sym, snap["last"])
     return guard(run)
 
 

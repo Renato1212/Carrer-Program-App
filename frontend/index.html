@@ -41,6 +41,7 @@
     <div class="live-grid">
       <div class="panel chart-panel">
         <div class="panel-title">Chart <span id="chart-symbol" class="accent"></span>
+          <button class="info" data-info="Click anywhere on the chart to place a SIMULATED order at that price (limit below/above market is inferred automatically, bracket stop/target taken from the Trade tab settings). Your sim position shows as an amber line, working orders as dashed lines. Swing pivots and detected patterns are marked on 5m bars.">i</button>
           <span class="seg" id="chart-intervals">
             <button data-i="1m" data-p="1d">1m</button>
             <button data-i="5m" data-p="5d" class="active">5m</button>
@@ -53,7 +54,7 @@
       </div>
       <div class="side-col">
         <div class="panel">
-          <div class="panel-title">Data Connection <button class="info" data-info="EdgeDesk runs on free delayed data by default. Connect Rithmic credentials from a prop-firm account (Apex, Lucid, Take Profit Trader and other Rithmic-based firms) to stream real-time exchange ticks into the board and order-flow tools — the first step toward EdgeDesk becoming a full trading front-end. Requires running EdgeDesk locally with the optional async_rithmic package installed.">i</button></div>
+          <div class="panel-title">Data Connection <button class="info" data-info="EdgeDesk runs on free delayed data by default. Connect Rithmic credentials from a prop-firm account (Apex, Lucid, Take Profit Trader and other Rithmic-based firms) to stream real-time exchange ticks into the board and order-flow tools — the first step toward EdgeDesk becoming a full trading front-end. Works on a persistent host: deploy the included Render blueprint (free) or run locally — the Connect form guides you either way.">i</button></div>
           <div id="rithmic-body" class="small muted">Checking data source…</div>
         </div>
         <div class="panel">

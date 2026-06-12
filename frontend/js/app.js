@@ -213,6 +213,7 @@ async function loadBoard() {
   initSizer();
   loadOrderFlow();
   loadRithmic();
+  updateChartLines();
   try {
     const b = await api("/board");
     if (!b.futures) { $("#board-grid").innerHTML = errBox(b.error || "board unavailable"); return; }
@@ -253,6 +254,7 @@ async function renderChart() {
       upColor: "#34d399", downColor: "#fb5d6c", wickUpColor: "#34d399", wickDownColor: "#fb5d6c", borderVisible: false,
     });
     new ResizeObserver(() => state.chart.applyOptions({width: el.clientWidth})).observe(el);
+    initChartTrading(el);
   }
   try {
     const d = await api(`/candles/${state.symbol}?period=${state.period}&interval=${state.interval}`);
@@ -261,6 +263,82 @@ async function renderChart() {
     state.chart.timeScale().fitContent();
     loadPatterns();
   } catch (e) { console.warn("chart", e); }
+}
+
+/* ---------- chart click-to-trade (simulated account) ---------- */
+function initChartTrading(container) {
+  container.style.position = "relative";
+  const pop = document.createElement("div");
+  pop.className = "chart-popup";
+  pop.style.display = "none";
+  container.appendChild(pop);
+  state.chartPopup = pop;
+  state.chart.subscribeClick(param => {
+    if (!param.point || !state.series) { pop.style.display = "none"; return; }
+    const raw = state.series.coordinateToPrice(param.point.y);
+    if (raw == null) return;
+    const tick = (TICKS[state.symbol] || [0.25])[0];
+    const px = Math.round(raw / tick) * tick;
+    const dp = tick < 0.01 ? 5 : tick < 1 ? 2 : 0;
+    pop.innerHTML = `<b class="num">${fmt(px, dp)}</b>
+      <button class="btn-buy" data-s="buy">Buy</button>
+      <button class="btn-sell" data-s="sell">Sell</button>
+      <button class="t-x">✕</button>
+      <div class="muted" style="font-size:10px">simulated account · bracket from Trade tab settings</div>`;
+    pop.style.left = Math.min(param.point.x + 12, container.clientWidth - 190) + "px";
+    pop.style.top = Math.max(param.point.y - 14, 4) + "px";
+    pop.style.display = "block";
+    pop.querySelector(".t-x").onclick = () => pop.style.display = "none";
+    pop.querySelectorAll("[data-s]").forEach(b => b.onclick = async () => {
+      pop.style.display = "none";
+      await placeChartOrder(b.dataset.s, px);
+    });
+  });
+}
+
+async function placeChartOrder(side, price) {
+  try {
+    const d = await api(`/dom/${state.symbol}`);
+    if (!d.ok) { showToast({kind: "headline", id: "co" + Date.now(), text: "Order rejected: " + (d.error || "no market data")}); return; }
+    const tick = d.tick;
+    let otype = "limit";
+    if (side === "buy" && price > d.last) otype = "stop";
+    if (side === "sell" && price < d.last) otype = "stop";
+    const slT = parseInt(($("#dom-sl") || {}).value, 10) || 16;
+    const tpT = parseInt(($("#dom-tp") || {}).value, 10) || 32;
+    const dir = side === "buy" ? 1 : -1;
+    const body = {symbol: state.symbol, side, qty: parseInt(($("#dom-qty") || {}).value, 10) || 1,
+                  otype, price, stop_loss: price - dir * slT * tick, take_profit: price + dir * tpT * tick};
+    const r = await fetch("/api/paper/order", {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const j = await r.json();
+    showToast({kind: j.ok ? "prediction" : "headline", id: "co" + Date.now(),
+               text: j.ok ? `Sim ${otype} ${side} placed at ${fmt(price, 2)} (bracket ${slT}/${tpT} ticks). Track it on the Trade tab.`
+                          : "Order rejected: " + (j.error || "")});
+    updateChartLines();
+  } catch (e) { /* best effort */ }
+}
+
+async function updateChartLines() {
+  if (!state.series || state.tab !== "board") return;
+  try {
+    const d = await api(`/dom/${state.symbol}`);
+    if (!d.ok) return;
+    (state.chartLines || []).forEach(l => { try { state.series.removePriceLine(l); } catch (e) {} });
+    state.chartLines = [];
+    const a = d.account || {};
+    if (a.position && a.avg_price) {
+      state.chartLines.push(state.series.createPriceLine({
+        price: a.avg_price, color: "#ffd60a", lineWidth: 2, lineStyle: 0,
+        title: `POS ${a.position > 0 ? "+" : ""}${a.position}`}));
+    }
+    (a.open_orders || []).forEach(o => {
+      state.chartLines.push(state.series.createPriceLine({
+        price: o.price, color: o.otype === "stop" ? "#ff453a" : "#0a84ff",
+        lineWidth: 1, lineStyle: 2,
+        title: `${o.side.toUpperCase()} ${o.qty} ${o.otype}`}));
+    });
+  } catch (e) { /* best effort */ }
 }
 
 async function loadPatterns() {
@@ -429,9 +507,6 @@ function computeSizer() {
 }
 
 /* ---------- profile workbench ---------- */
-const WB_COLORS = { bar: "#2c4258", va: "#3d7ab5", poc: "#fbbf24", single: "#a78bfa",
-                    ib: "#a78bfa", naked: "#fbbf24", grid: "#16202f", text: "#56708c" };
-
 function wbState() {
   if (!state.wb) state.wb = { days: 10, session: "rth", mode: "tpo", va: 70,
     show: {trail: true, vaBand: true, ib: true, oc: true, singles: true, naked: true, vwap: true},
@@ -1386,26 +1461,38 @@ function renderLadder(d) {
   });
   const maxVol = Math.max(...d.ladder.map(l => l.vol), 1);
   const dp = d.tick < 0.01 ? 5 : d.tick < 1 ? 2 : 0;
+  const pocPrice = d.poc;
   const rows = d.ladder.map(l => {
     const isLast = Math.abs(l.price - d.last) < d.tick / 2;
     const isPos = acct.position && acct.avg_price && Math.abs(l.price - acct.avg_price) < d.tick / 2;
+    const isVwap = d.vwap && Math.abs(l.price - d.vwap) < d.tick / 2;
+    const isPoc = pocPrice != null && Math.abs(l.price - pocPrice) < d.tick / 2;
     const mine = myByPrice[Number(l.price).toFixed(6)] || [];
     const myBuy = mine.filter(o => o.side === "buy");
     const mySell = mine.filter(o => o.side === "sell");
     const myCell = arr => arr.length
       ? `<td class="d-my" data-cancel="${arr[0].id}" title="click to cancel">${arr.reduce((s, o) => s + o.qty, 0)}${arr[0].otype === "stop" ? "s" : ""}</td>`
       : `<td class="d-my"></td>`;
-    return `<tr class="${isLast ? "d-last" : ""} ${isPos ? "d-pos" : ""} ${l.ice ? "d-ice" : ""}">
+    return `<tr class="${isLast ? "d-last" : ""} ${isPos ? "d-pos" : ""} ${l.ice ? "d-ice" : ""} ${isVwap ? "d-vwap" : ""}">
       ${myCell(myBuy)}
       <td class="d-bid" data-side="buy" data-price="${l.price}">${l.bid || ""}</td>
-      <td class="d-price"><div class="d-volbar" style="width:${l.vol / maxVol * 100}%"></div><span>${fmt(l.price, dp)}</span></td>
+      <td class="d-price"><span>${fmt(l.price, dp)}${isVwap ? " ◆" : ""}</span></td>
       <td class="d-ask" data-side="sell" data-price="${l.price}">${l.ask || ""}</td>
       ${myCell(mySell)}
+      <td class="d-vp"><div class="d-vpbar ${isPoc ? "poc" : ""}" style="width:${Math.max(l.vol / maxVol * 100, l.vol ? 3 : 0)}%"></div></td>
     </tr>`;
   }).join("");
-  $("#dom-ladder").innerHTML = `<table class="dom-table">
-    <tr><th style="width:46px">B-ord</th><th>Bids</th><th>Price · vol</th><th>Asks</th><th style="width:46px">S-ord</th></tr>
-    ${rows}</table>`;
+  const imb = d.imbalance != null ? d.imbalance : 50;
+  $("#dom-ladder").innerHTML = `
+    <div class="imb-wrap" title="Visible resting bids vs asks across the ladder. A heavy skew means one side is showing more size - but remember from the signal feed: shown size can be pulled.">
+      <span class="small num up">${fmt(imb, 0)}%</span>
+      <div class="imb-bar"><div style="width:${imb}%"></div></div>
+      <span class="small num down">${fmt(100 - imb, 0)}%</span>
+    </div>
+    <table class="dom-table">
+    <tr><th style="width:42px">B-ord</th><th>Bids</th><th>Price</th><th>Asks</th><th style="width:42px">S-ord</th><th style="width:64px">Profile</th></tr>
+    ${rows}</table>
+    <div class="muted" style="font-size:10.5px;margin-top:5px">◆ session VWAP · amber profile bar = POC · gold-edged row = iceberg level</div>`;
   $("#dom-src").textContent = `${d.source}${d.simulated_book ? " · book simulated (training)" : ""}`;
   $$("#dom-ladder .d-bid, #dom-ladder .d-ask").forEach(td => td.onclick = () => {
     const price = parseFloat(td.dataset.price);
@@ -1448,6 +1535,7 @@ function renderDomAccount(d) {
       <span>Equity <b class="${cls(a.equity - 100000)}">$${fmt(a.equity)}</b></span>
       <span>Open P&L <b class="${cls(a.unrealized)}">${sign(a.unrealized)}$${fmt(Math.abs(a.unrealized))}</b></span>
       <span>Realized <b class="${cls(a.realized)}">${sign(a.realized)}$${fmt(Math.abs(a.realized))}</b></span>
+      ${d.vwap ? `<span>VWAP <b class="num">${fmt(d.vwap, 2)}</b></span>` : ""}
     </div>
     <div class="small">Position: <b class="num ${cls(a.position)}">${a.position > 0 ? "+" : ""}${a.position || 0}</b>
       ${a.position ? `@ <span class="num">${fmt(a.avg_price, 2)}</span>` : "(flat)"}
