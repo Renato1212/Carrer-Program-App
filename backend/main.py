@@ -64,8 +64,9 @@ def composite_profile(symbol: str, days: int = 10):
 
 
 @app.get("/api/profile-advanced/{symbol}")
-def profile_advanced(symbol: str, days: int = 10, session: str = "rth", va: float = 70.0):
-    return guard(profile_adv.workbench, symbol.upper(), days, session, va)
+def profile_advanced(symbol: str, days: int = 10, session: str = "rth", va: float = 70.0,
+                     tpr: int = 0):
+    return guard(profile_adv.workbench, symbol.upper(), days, session, va, tpr)
 
 
 @app.get("/api/gameplan/{symbol}")

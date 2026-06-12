@@ -62,7 +62,8 @@ def _rotation_factor(g: pd.DataFrame) -> int:
     return rf
 
 
-def workbench(symbol: str, days: int = 10, session: str = "rth", va_pct: float = 70.0) -> dict:
+def workbench(symbol: str, days: int = 10, session: str = "rth", va_pct: float = 70.0,
+              ticks_per_row: int = 0) -> dict:
     days = max(2, min(days, 20))
     va_pct = min(max(va_pct, 50), 95)
     session = session if session in ("rth", "eth", "all") else "rth"
@@ -76,7 +77,14 @@ def workbench(symbol: str, days: int = 10, session: str = "rth", va_pct: float =
     glob_lo = min(float(sess[k].Low.min()) for k in keys)
     tick = md.INSTRUMENTS.get(symbol, {}).get("tick", 0.25)
     span = glob_hi - glob_lo
-    mult = max(1, round(span / 200 / tick))      # <=~200 shared rows
+    if ticks_per_row and ticks_per_row > 0:
+        mult = int(ticks_per_row)
+        if span / (mult * tick) > 900:
+            raise ValueError(
+                f"{mult} tick(s) per row gives {int(span / (mult * tick))} rows over this range - "
+                f"too fine to render. Increase ticks per row (or reduce the day count).")
+    else:
+        mult = max(1, round(span / 200 / tick))      # auto: <=~200 shared rows
     step = mult * tick
     base = np.floor(glob_lo / step) * step
     n_rows = int(np.ceil((glob_hi - base) / step)) + 1
@@ -168,7 +176,8 @@ def workbench(symbol: str, days: int = 10, session: str = "rth", va_pct: float =
     last_px = float(df30.iloc[-1].Close)
     return {
         "ok": True, "symbol": symbol, "session_mode": session, "va_pct": va_pct,
-        "step": step, "grid": [round(float(p), 4) for p in grid],
+        "step": step, "tick": tick, "ticks_per_row": mult,
+        "grid": [round(float(p), 4) for p in grid],
         "last": round(last_px, 4),
         "sessions": sessions_out,
         "composite": {"tpo": [int(x) for x in sum_tpo], "vol": [int(x) for x in sum_vol],

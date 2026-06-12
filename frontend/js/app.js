@@ -399,7 +399,7 @@ const WB_COLORS = { bar: "#2c4258", va: "#3d7ab5", poc: "#fbbf24", single: "#a78
 function wbState() {
   if (!state.wb) state.wb = { days: 10, session: "rth", mode: "tpo", va: 70,
     show: {trail: true, vaBand: true, ib: true, oc: true, singles: true, naked: true, vwap: true},
-    typeFilter: "", data: null, view: null };
+    typeFilter: "", data: null, view: null, tpr: 0 };
   return state.wb;
 }
 
@@ -423,6 +423,10 @@ async function loadProfile() {
             .map(([k, l]) => `<button data-v="${k}" ${wb.mode === k ? 'class="active"' : ""}>${l}</button>`).join("")}</span></span>
         <span class="wb-group"><span class="wb-lbl">Value</span><span class="seg" id="wb-va">
           ${[68, 70, 80].map(v => `<button data-v="${v}" ${wb.va === v ? 'class="active"' : ""}>${v}%</button>`).join("")}</span></span>
+        <span class="wb-group"><span class="wb-lbl">Ticks/row</span><select id="wb-tpr">
+          ${[[0, "Auto"], [1, "1"], [2, "2"], [4, "4"], [5, "5"], [8, "8"], [10, "10"], [16, "16"], [20, "20"], [25, "25"], [50, "50"]]
+            .map(([v, l]) => `<option value="${v}" ${wb.tpr === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+          <button class="info" data-info="How many ticks of price each TPO row represents — the vertical resolution of the profile. Fewer ticks per row = finer letter prints (more rows, more detail); more ticks = a compressed, structural view. Real platforms default ES to 4–6 ticks per row for a clean RTH letter profile. Auto picks a size that fits the whole range on screen.">i</button></span>
         <span class="wb-group"><span class="wb-lbl">Overlays</span><span class="seg" id="wb-show">
           ${[["trail", "POC trail"], ["vaBand", "VA band"], ["ib", "IB"], ["oc", "O/C"], ["singles", "Singles"], ["naked", "Naked POC"], ["vwap", "VWAP"]]
             .map(([k, l]) => `<button data-v="${k}" ${wb.show[k] ? 'class="active"' : ""}>${l}</button>`).join("")}</span></span>
@@ -457,6 +461,8 @@ function wireWorkbenchControls() {
   wire("wb-session", b => { wb.session = b.dataset.v; fetchWorkbench(); });
   wire("wb-mode", b => { wb.mode = b.dataset.v; drawWorkbench(); });
   wire("wb-va", b => { wb.va = parseInt(b.dataset.v, 10); fetchWorkbench(); });
+  const tpr = $("#wb-tpr");
+  if (tpr) tpr.onchange = () => { wb.tpr = parseInt(tpr.value, 10); wb.view = null; fetchWorkbench(); };
   wire("wb-show", b => { wb.show[b.dataset.v] = !wb.show[b.dataset.v]; drawWorkbench(); }, true);
   wire("wb-type", b => { wb.typeFilter = b.dataset.v; drawWorkbench(); renderWbStats(); });
 }
@@ -466,14 +472,15 @@ async function fetchWorkbench() {
   const st = $("#wb-status");
   if (st) { st.style.display = ""; st.textContent = `Building ${wb.days} ${wb.session.toUpperCase()} sessions…`; }
   try {
-    const d = await api(`/profile-advanced/${state.symbol}?days=${wb.days}&session=${wb.session}&va=${wb.va}`);
+    const d = await api(`/profile-advanced/${state.symbol}?days=${wb.days}&session=${wb.session}&va=${wb.va}&tpr=${wb.tpr || 0}`);
     if (!d.ok) throw new Error(d.error || "workbench unavailable");
     wb.data = d;
     if (st) st.style.display = "none";
     drawWorkbench();
     renderWbStats();
     const lg = $("#wb-legend");
-    if (lg) lg.innerHTML = `<span class="lg" style="background:${WB_COLORS.bar}"></span> outside value
+    if (lg) lg.innerHTML = `<b class="num">${d.ticks_per_row} tick${d.ticks_per_row > 1 ? "s" : ""}/row (${fmt(d.step, 4)} pts)</b> ·
+      <span class="lg" style="background:${WB_COLORS.bar}"></span> outside value
       <span class="lg" style="background:${WB_COLORS.va}"></span> value area
       <span class="lg" style="background:${WB_COLORS.poc}"></span> POC
       <span class="lg" style="background:${WB_COLORS.single}"></span> single prints / IB
@@ -490,6 +497,17 @@ function wbVisibleSessions() {
 }
 
 const WB_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+function periodColor(p, total) {
+  const hue = 350 - (p / Math.max(total - 1, 1)) * 215;   // A=red/pink -> mid=blue -> last=green
+  return `hsl(${hue}, 62%, 56%)`;
+}
+
+function cellPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+  else ctx.rect(x, y, w, h);
+}
 
 function drawWorkbench() {
   const wb = wbState();
@@ -557,25 +575,57 @@ function drawWorkbench() {
     }
 
     if (mode === "letters") {
-      const charH = Math.max(6, Math.min(12, rowH));
-      ctx.font = `${charH}px JetBrains Mono`;
-      const charW = charH * 0.66;
+      const periods = s.period_ranges || [];
+      const nP = Math.max(periods.length, 1);
+      const volW = Math.min(60, usable * 0.30);
+      const lettersW = usable - volW - 5;
+      const cellH = Math.max(2, Math.min(rowH - 0.8, 17));
+      const cellW = Math.max(3, Math.min(cellH * 0.95, lettersW / Math.min(nP, 11)));
+      const maxFit = Math.max(1, Math.floor(lettersW / cellW));
+      const maxV = Math.max(...s.vol, 1);
+      const fontPx = Math.min(cellH - 4, 10.5);
       for (let i = s.lo_i; i <= s.hi_i; i++) {
         if (!inView(i) || !s.tpo[i]) continue;
-        const y = yOf(grid[i]) + charH * 0.35;
-        let x = x0, drawn = 0;
-        for (let p = 0; p < (s.period_ranges || []).length; p++) {
-          const [a, b] = s.period_ranges[p];
-          if (i >= a && i <= b) {
-            if ((drawn + 1) * charW > usable) { ctx.fillStyle = "#6e6e76"; ctx.fillText("+", x, y); break; }
-            ctx.fillStyle = i === s.poc_i ? "#ffd60a"
-              : (i >= s.val_i && i <= s.vah_i) ? "#aebfd4" : "#7a8aa0";
-            if (rowH >= 6) ctx.fillText(WB_LETTERS[p] || "+", x, y);
-            else ctx.fillRect(x, yOf(grid[i]) - rowH / 2, charW - 1, Math.max(1, rowH - 1));
-            x += charW; drawn++;
+        const yC = yOf(grid[i]);
+        if (yC < padT - rowH || yC > H - padB + rowH) continue;
+        let x = x0, drawn = 0, overflow = false;
+        for (let p = 0; p < nP; p++) {
+          const [a, b] = periods[p];
+          if (i < a || i > b) continue;
+          if (drawn >= maxFit) { overflow = true; break; }
+          ctx.fillStyle = i === s.poc_i ? "#00b2ff" : periodColor(p, nP);
+          cellPath(ctx, x, yC - cellH / 2, cellW - 1.2, cellH, Math.min(3.5, cellH / 3));
+          ctx.fill();
+          if (cellH >= 8.5) {
+            ctx.fillStyle = "rgba(255,255,255,.95)";
+            ctx.font = `600 ${fontPx}px JetBrains Mono`;
+            ctx.fillText(WB_LETTERS[p] || "+", x + (cellW - 1.2) / 2 - fontPx * 0.3, yC + fontPx * 0.36);
           }
+          x += cellW; drawn++;
+        }
+        if (overflow && cellH >= 8.5) { ctx.fillStyle = "#9a9aa2"; ctx.fillText("\u203a", x + 1, yC + 3); }
+        // buy/sell split volume bar beside the prints
+        const vb = s.vol[i] || 0;
+        if (vb > 0) {
+          const buy = Math.max(0, Math.min(vb, (vb + (s.dlt[i] || 0)) / 2));
+          const bw = vb / maxV * volW;
+          const vx = x0 + lettersW + 5;
+          const bh = Math.max(1.5, Math.min(rowH - 1, cellH * 0.6));
+          ctx.fillStyle = "rgba(48,209,88,.78)";
+          ctx.fillRect(vx, yC - bh / 2, bw * (buy / vb), bh);
+          ctx.fillStyle = "rgba(255,69,58,.78)";
+          ctx.fillRect(vx + bw * (buy / vb), yC - bh / 2, bw * (1 - buy / vb), bh);
         }
       }
+      // VAH / VAL / POC guides on the column
+      ctx.font = "9px JetBrains Mono";
+      [["VAH", s.vah_i, "#64d2ff"], ["POC", s.poc_i, "#00b2ff"], ["VAL", s.val_i, "#64d2ff"]].forEach(([lbl, idx, col]) => {
+        const y = yOf(grid[idx]);
+        if (y < padT || y > H - padB) return;
+        ctx.strokeStyle = col; ctx.beginPath();
+        ctx.moveTo(x0 - 6, y); ctx.lineTo(x0 - 1, y); ctx.stroke();
+        if (colW > 120) { ctx.fillStyle = col; ctx.fillText(lbl, x0 - 6, y - 3); }
+      });
     } else if (mode === "heat") {
       const maxV = Math.max(...s.vol, 1);
       for (let i = s.lo_i; i <= s.hi_i; i++) {
