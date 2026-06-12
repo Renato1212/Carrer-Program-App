@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from backend.cache import ttl_cache
 from backend.services import econ_calendar, fedwatch, flow, levels, news as news_svc
 from backend.services import market_data as md
 from backend.services import predictions
@@ -44,6 +45,7 @@ def _suggest_setups(lv: dict, gex: dict) -> list[dict]:
     return out[:5]
 
 
+@ttl_cache(seconds=45)
 def premarket_briefing(symbol: str = "ES") -> dict:
     now = datetime.now(ET)
     cal = econ_calendar.upcoming(days_ahead=3)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from backend.cache import ttl_cache
 from backend.services import market_data as md
 from backend.services import profile as prof
 
@@ -29,6 +30,7 @@ RELATION_LABEL = {
 }
 
 
+@ttl_cache(seconds=90)
 def composite_pack(symbol: str, days: int = 10) -> dict:
     df30 = md.get_history(symbol, "1mo", "30m")
     sessions = md.rth_sessions(df30)

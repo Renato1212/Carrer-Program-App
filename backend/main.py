@@ -11,11 +11,15 @@ from fastapi import Body, FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+import os
+import threading
+import time as _time
+
 from backend.services import (briefing, central_banks, composite, correlations,
                               econ_calendar, fedwatch, flow, gameplan, journal,
-                              levels, market_data, news, orderflow, playbooks,
-                              predictions, profile, profile_adv, rithmic,
-                              sentiment)
+                              levels, market_data, news, orderflow, patterns,
+                              playbooks, predictions, profile, profile_adv,
+                              rithmic, sentiment)
 
 app = FastAPI(title="EdgeDesk", version="1.1",
               description="Free-data command center for futures day traders")
@@ -78,6 +82,11 @@ def game_plan(symbol: str):
 @app.get("/api/levels/{symbol}")
 def key_levels(symbol: str):
     return guard(levels.key_levels, symbol.upper())
+
+
+@app.get("/api/patterns/{symbol}")
+def chart_patterns(symbol: str):
+    return guard(patterns.detect, symbol.upper())
 
 
 # ----- macro / central banks -----
@@ -198,6 +207,25 @@ def delete_trade(trade_id: int):
 @app.get("/api/journal/metrics")
 def journal_metrics():
     return guard(journal.metrics)
+
+
+# ----- background warmer: keeps hot endpoints precomputed on persistent hosts -----
+def _warm_loop():
+    while True:
+        for fn in (market_data.get_board, news.get_news,
+                   lambda: gameplan.build("ES"), lambda: econ_calendar.upcoming(14),
+                   lambda: patterns.detect("ES")):
+            try:
+                fn()
+            except Exception:
+                pass
+        _time.sleep(75)
+
+
+@app.on_event("startup")
+def _start_warmer():
+    if not (os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")):
+        threading.Thread(target=_warm_loop, daemon=True).start()
 
 
 # ----- frontend -----

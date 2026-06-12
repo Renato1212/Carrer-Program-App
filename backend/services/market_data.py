@@ -57,6 +57,34 @@ CONTEXT_TICKERS = {
 }
 
 
+STOOQ = {"ES": "es.f", "NQ": "nq.f", "YM": "ym.f", "RTY": "rty.f", "CL": "cl.f",
+         "NG": "ng.f", "GC": "gc.f", "SI": "si.f", "HG": "hg.f", "ZB": "zb.f",
+         "ZN": "zn.f", "6E": "6e.f", "6J": "6j.f", "VIX": "vi.f"}
+
+
+def _stooq_quote(symbol: str):
+    """Keyless CSV fallback (stooq.com) when Yahoo is throttled."""
+    code = STOOQ.get(symbol)
+    if not code:
+        return None
+    try:
+        import httpx
+        r = httpx.get(f"https://stooq.com/q/l/?s={code}&f=sd2t2ohlcv&h&e=csv", timeout=6)
+        r.raise_for_status()
+        rows = r.text.strip().splitlines()
+        if len(rows) < 2:
+            return None
+        parts = rows[1].split(",")
+        close = float(parts[6])
+        op = float(parts[3])
+        return {"last": close, "prev_close": None, "change": round(close - op, 6),
+                "change_pct": round((close - op) / op * 100, 3) if op else None,
+                "day_high": float(parts[4]), "day_low": float(parts[5]),
+                "ok": True, "source": "stooq (vs open)"}
+    except Exception:
+        return None
+
+
 def _safe(v):
     if v is None:
         return None
@@ -89,6 +117,10 @@ def get_quote(symbol: str) -> dict:
         })
     except Exception as e:  # network blocked / ticker missing -> degrade, never crash
         out.update({"ok": False, "error": str(e)[:200]})
+    if not out.get("ok"):
+        alt = _stooq_quote(symbol)
+        if alt:
+            out.update(alt)
     return out
 
 

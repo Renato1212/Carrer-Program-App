@@ -16,6 +16,20 @@ const cls = n => n > 0 ? "up" : n < 0 ? "down" : "flat";
 const sign = n => n > 0 ? "+" : "";
 const errBox = (msg, hint = "") => `<div class="err">⚠ ${esc(msg)}${hint ? `<div class="mt8 muted">${esc(hint)}</div>` : ""}</div>`;
 
+function hiDPI(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  if (!cv.dataset.h) cv.dataset.h = cv.getAttribute("height") || cv.height || 300;
+  const H = parseInt(cv.dataset.h, 10);
+  const W = cv.clientWidth || 600;
+  cv.style.height = H + "px";
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  return {ctx, W, H};
+}
+
 async function api(path) {
   const r = await fetch("/api" + path);
   if (!r.ok) throw new Error(`server error ${r.status}`);
@@ -242,17 +256,36 @@ async function renderChart() {
     if (!d.ok) throw new Error(d.error);
     state.series.setData(d.candles);
     state.chart.timeScale().fitContent();
+    loadPatterns();
   } catch (e) { console.warn("chart", e); }
 }
 
+async function loadPatterns() {
+  const box = $("#structure-read");
+  try {
+    const p = await api(`/patterns/${state.symbol}`);
+    if (!p.ok) {
+      if (box) box.innerHTML = "";
+      if (state.series) state.series.setMarkers([]);
+      return;
+    }
+    // markers are built on 5m pivots - only pin them when the chart shows 5m bars
+    if (state.series) state.series.setMarkers(state.interval === "5m" ? (p.markers || []) : []);
+    if (box) box.innerHTML = `
+      <div class="panel-title" style="margin-top:14px">Structure Read — <span class="accent">${esc(p.structure)}</span>
+        <button class="info" data-info="${esc(p.how_to_read)}">i</button>
+        <small>swing pivots, coils, double tops/bottoms, breakout proximity — auto-detected</small></div>
+      <ul class="clean small">${(p.reads || []).map(r => `<li>${esc(r)}</li>`).join("")}</ul>`;
+  } catch (e) { if (box) box.innerHTML = ""; }
+}
+
 async function loadRelVol() {
-  const cv = $("#relvol-canvas"), ctx = cv.getContext("2d");
-  cv.width = cv.clientWidth || 1200;
-  ctx.clearRect(0, 0, cv.width, cv.height);
+  const cv = $("#relvol-canvas");
+  const {ctx, W} = hiDPI(cv);
   try {
     const d = await api(`/relative-volume/${state.symbol}`);
     if (!d.ok) throw new Error(d.error);
-    const n = d.slots.length, w = cv.width / n, max = Math.max(...d.avg, ...d.today, 1);
+    const n = d.slots.length, w = W / n, max = Math.max(...d.avg, ...d.today, 1);
     d.slots.forEach((s, i) => {
       const ha = d.avg[i] / max * 115, ht = d.today[i] / max * 115;
       ctx.fillStyle = "#2c4258"; ctx.fillRect(i * w + 1, 128 - ha, w * 0.44, ha);
@@ -296,9 +329,8 @@ async function loadOrderFlow() {
 
 function drawDelta(series) {
   const cv = $("#of-canvas"); if (!cv || !series || series.length < 2) return;
-  const ctx = cv.getContext("2d");
-  cv.width = cv.clientWidth || 300;
-  const W = cv.width, H = cv.height, pad = 4;
+  const {ctx, W, H} = hiDPI(cv);
+  const pad = 4;
   const vals = series.map(p => p.value);
   const min = Math.min(0, ...vals), max = Math.max(0, ...vals), span = (max - min) || 1;
   const x = i => pad + i / (series.length - 1) * (W - 2 * pad);
@@ -510,10 +542,7 @@ function drawWorkbench() {
   if (!cv || !wb.data) return;
   const d = wb.data;
   const sessions = wbVisibleSessions();
-  const ctx = cv.getContext("2d");
-  const W = cv.width = cv.clientWidth || 1200;
-  const H = cv.height;
-  ctx.clearRect(0, 0, W, H);
+  const {ctx, W, H} = hiDPI(cv);
   if (!sessions.length) {
     ctx.fillStyle = "#6e6e76"; ctx.font = "13px JetBrains Mono";
     ctx.fillText("no sessions match the day-type filter", 20, 50);
@@ -682,13 +711,13 @@ function drawWorkbench() {
     ctx.stroke(); ctx.lineWidth = 1;
   }
 
-  wireWbInteract(cv, {padL, padT, padB, colW, sessions, grid, rowH, vLo, vHi, step, fullLo, fullHi});
+  wireWbInteract(cv, {padL, padT, padB, colW, sessions, grid, rowH, vLo, vHi, step, fullLo, fullHi, H});
 }
 
 function wireWbInteract(cv, geo) {
   const wb = wbState();
   const tip = $("#wb-tip");
-  const priceAt = y => geo.vLo + (1 - (y - geo.padT) / (cv.height - geo.padT - geo.padB)) * (geo.vHi - geo.vLo);
+  const priceAt = y => geo.vLo + (1 - (y - geo.padT) / (geo.H - geo.padT - geo.padB)) * (geo.vHi - geo.vLo);
   let dragY = null, dragged = false;
 
   cv.onmousemove = ev => {
@@ -707,7 +736,7 @@ function wireWbInteract(cv, geo) {
       return;
     }
     const si = Math.floor((x - geo.padL) / geo.colW);
-    if (si < 0 || si >= geo.sessions.length || y < geo.padT || y > cv.height - geo.padB) { tip.style.display = "none"; return; }
+    if (si < 0 || si >= geo.sessions.length || y < geo.padT || y > geo.H - geo.padB) { tip.style.display = "none"; return; }
     const s = geo.sessions[si];
     const grid = geo.grid;
     const price = priceAt(y);
@@ -987,9 +1016,8 @@ async function loadNews(refreshOnly = false) {
 /* ---------- central banks ---------- */
 function drawLineChart(canvasId, seriesList, opts = {}) {
   const cv = $("#" + canvasId); if (!cv || !seriesList.length) return;
-  const ctx = cv.getContext("2d");
-  const W = cv.width = cv.clientWidth || 600, H = cv.height, padL = 36, padB = 18, padT = 8, padR = 6;
-  ctx.clearRect(0, 0, W, H);
+  const {ctx, W, H} = hiDPI(cv);
+  const padL = 36, padB = 18, padT = 8, padR = 6;
   const all = seriesList.flatMap(s => s.points.map(p => p.v));
   if (!all.length) return;
   const min = Math.min(...all), max = Math.max(...all), span = (max - min) || 1;
@@ -1279,9 +1307,8 @@ async function loadJournal() {
 
 function drawEquity(curve) {
   const cv = $("#eq-canvas"); if (!cv || !curve || !curve.length) return;
-  const ctx = cv.getContext("2d");
-  cv.width = cv.clientWidth || 600;
-  const W = cv.width, H = cv.height, pad = 10;
+  const {ctx, W, H} = hiDPI(cv);
+  const pad = 10;
   const vals = curve.map(c => c.equity);
   const min = Math.min(0, ...vals), max = Math.max(0, ...vals), span = (max - min) || 1;
   const x = i => pad + i / Math.max(curve.length - 1, 1) * (W - 2 * pad);
@@ -1317,7 +1344,7 @@ async function loadRithmic() {
       return;
     }
     const blocked = s.serverless
-      ? `<p class="small" style="color:var(--amber)">This is the shared web deployment — live broker sockets need a persistent process. Run EdgeDesk locally (see README) and connect there.</p>` : "";
+      ? `<p class="small" style="color:var(--amber)">This deployment is serverless, which cannot hold a live broker socket. Deploy EdgeDesk's included Render blueprint (README → "Always-on deployment", free tier) to get a web instance that connects Rithmic directly in the browser — no local install needed.</p>` : "";
     const lib = !s.lib_installed
       ? `<p class="muted small">${esc(s.lib_info)}</p>` : "";
     body.innerHTML = `
@@ -1397,6 +1424,12 @@ document.addEventListener("click", ev => {
 initShell();
 loadTab("briefing");
 pollAlerts();
+// idle prefetch: warm the other desks right after first paint so tab switches feel instant
+setTimeout(() => {
+  ["/board", "/news", "/calendar?days=13&country=USD", `/patterns/${state.symbol}`,
+   `/profile-advanced/${state.symbol}?days=10&session=rth&va=70&tpr=0`]
+    .forEach(p => api(p).catch(() => {}));
+}, 3500);
 setInterval(pollAlerts, 30000);
 setInterval(() => { if (state.tab === "board") { loadBoard(); } }, 15000);
 setInterval(() => { if (state.tab === "news") loadNews(true); }, 45000);

@@ -74,6 +74,21 @@ labeled error in that panel, never a crash.
 - No tick/DOM data on free feeds — order-flow principles (Days 10–13) are
   delivered as structured playbooks rather than a live DOM.
 
+## Always-on deployment (recommended): Render
+
+Serverless hosting (Vercel) is fine for a quick look, but it cold-starts
+(10-20s first load) and cannot hold live broker sockets. The included
+`render.yaml` deploys EdgeDesk to Render's free tier as a persistent process:
+
+1. Go to **https://render.com** → New → Blueprint → connect this repository.
+2. Render reads `render.yaml` and deploys automatically. Done.
+
+A persistent instance unlocks: the background warmer (hot endpoints are
+precomputed, so pages load instantly), the intraday Fed-repricing monitor,
+a journal database that survives, and **Rithmic connections directly from the
+web app** — no local install. Note: connect broker credentials only on YOUR
+private instance, never on a URL you share publicly.
+
 ## Live data: connecting Rithmic (prop-firm accounts)
 
 EdgeDesk runs on free delayed data by default. If you have Rithmic credentials

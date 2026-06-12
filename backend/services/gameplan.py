@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from backend.cache import ttl_cache
 from backend.services import briefing, composite
 
 ET = ZoneInfo("America/New_York")
@@ -60,6 +61,7 @@ def _zone_action(parts: list[dict], side: str) -> str:
     return f"{verb} current price. " + "; ".join(bits[:3]).capitalize() + "."
 
 
+@ttl_cache(seconds=45)
 def build(symbol: str = "ES") -> dict:
     b = briefing.premarket_briefing(symbol)
     try:

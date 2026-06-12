@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from backend.cache import ttl_cache
 from backend.services import market_data as md
 from backend.services import profile as prof
 
@@ -25,6 +26,7 @@ def _touched(df, level: float) -> int:
     return int(((df.Low <= level) & (df.High >= level)).sum())
 
 
+@ttl_cache(seconds=45)
 def key_levels(symbol: str) -> dict:
     """All structural levels a futures day trader preps before the bell."""
     try:

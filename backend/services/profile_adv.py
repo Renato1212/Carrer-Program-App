@@ -13,6 +13,7 @@ from datetime import time as dtime, timedelta
 import numpy as np
 import pandas as pd
 
+from backend.cache import ttl_cache
 from backend.services import market_data as md
 from backend.services import profile as prof
 
@@ -62,6 +63,7 @@ def _rotation_factor(g: pd.DataFrame) -> int:
     return rf
 
 
+@ttl_cache(seconds=90)
 def workbench(symbol: str, days: int = 10, session: str = "rth", va_pct: float = 70.0,
               ticks_per_row: int = 0) -> dict:
     days = max(2, min(days, 20))
