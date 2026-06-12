@@ -153,7 +153,7 @@ def _parse_feed(xml_text: str, source: str, weight: float) -> list[dict]:
     return items
 
 
-@ttl_cache(seconds=75)
+@ttl_cache(seconds=40)
 def get_news() -> dict:
     all_items, errors = [], []
     with httpx.Client(timeout=8, headers={"User-Agent": "Mozilla/5.0 (EdgeDesk RSS)"},

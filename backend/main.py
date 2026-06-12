@@ -11,10 +11,11 @@ from fastapi import Body, FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.services import (briefing, composite, correlations, econ_calendar,
-                              fedwatch, flow, gameplan, journal, levels,
-                              market_data, news, orderflow, playbooks,
-                              predictions, profile, profile_adv, sentiment)
+from backend.services import (briefing, central_banks, composite, correlations,
+                              econ_calendar, fedwatch, flow, gameplan, journal,
+                              levels, market_data, news, orderflow, playbooks,
+                              predictions, profile, profile_adv, rithmic,
+                              sentiment)
 
 app = FastAPI(title="EdgeDesk", version="1.1",
               description="Free-data command center for futures day traders")
@@ -81,8 +82,51 @@ def key_levels(symbol: str):
 
 # ----- macro / central banks -----
 @app.get("/api/central-banks")
-def central_banks():
-    return guard(fedwatch.central_bank_desk)
+def central_banks_desk():
+    return guard(central_banks.desk)
+
+
+@app.get("/api/alerts")
+def live_alerts():
+    """Aggregated real-time alerts: rate repricings, critical headlines, prediction swings."""
+    def build():
+        out = []
+        mon = central_banks.rate_shift_monitor()
+        out.extend(mon.get("alerts", []))
+        nw = news.get_news()
+        for a in (nw.get("alerts") or [])[:6]:
+            if a["tier"] == "critical" and (a.get("age_min") or 9e9) < 60:
+                out.append({"id": "news-" + a["id"], "kind": "headline",
+                            "text": f"CRITICAL: {a['title']} ({a['source']}) - watch {'/'.join(a['impacts'])}"})
+        pr = predictions.desk()
+        for m in (pr.get("swing_alerts") or [])[:3]:
+            if abs(m["change_24h"]) >= 10:
+                out.append({"id": f"pred-{m['question'][:40]}", "kind": "prediction",
+                            "text": (f"Prediction market repricing: \"{m['question']}\" now {m['prob']}% "
+                                     f"({m['change_24h']:+.0f}pts/24h) - watch {'/'.join(m['impacts'])}")})
+        return {"ok": True, "alerts": out[:10]}
+    return guard(build)
+
+
+# ----- rithmic connectivity -----
+@app.get("/api/rithmic/status")
+def rithmic_status():
+    return guard(rithmic.status)
+
+
+@app.post("/api/rithmic/connect")
+def rithmic_connect(body: dict = Body(...)):
+    user = (body.get("user") or "").strip()
+    password = body.get("password") or ""
+    system = (body.get("system") or "").strip()
+    if not user or not password or not system:
+        return {"ok": False, "error": "user, password and system are all required"}
+    return guard(rithmic.connect, user, password, system)
+
+
+@app.post("/api/rithmic/disconnect")
+def rithmic_disconnect():
+    return guard(rithmic.disconnect)
 
 
 @app.get("/api/correlations")

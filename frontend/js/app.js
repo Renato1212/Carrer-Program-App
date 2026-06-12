@@ -45,7 +45,7 @@ function initShell() {
     renderCountdown();
   }, 1000);
   updateHeaderQuote();
-  setInterval(updateHeaderQuote, 30000);
+  setInterval(updateHeaderQuote, 15000);
   initCountdown();
 }
 
@@ -195,6 +195,7 @@ async function loadBoard() {
   loadRelVol();
   initSizer();
   loadOrderFlow();
+  loadRithmic();
   try {
     const b = await api("/board");
     if (!b.futures) { $("#board-grid").innerHTML = errBox(b.error || "board unavailable"); return; }
@@ -409,7 +410,7 @@ async function loadProfile() {
   el.innerHTML = `
     <div class="panel">
       <div class="panel-title">🔬 Market Profile Workbench — <span class="accent">${esc(state.symbol)}</span>
-        <button class="info" data-info="Each column is one trading session built on a single shared price scale, so shapes are directly comparable. TPO view shows time-at-price (acceptance); Letters is the classic TPO chart — each letter is one 30-minute period; Volume shows contracts traded at each price; Delta shows net aggressive buying (green) vs selling (red); Heatmap paints volume intensity; IB Split separates the first hour (purple) from the rest of the day (blue). Scroll to zoom the price axis, drag to pan, double-click to reset.">i</button>
+        <button class="info" data-info="The classic TPO chart: each column is one trading session on a single shared price scale, each letter block is one 30-minute period (A = first period, B = second…). Wide rows = prices the market ACCEPTED (it kept coming back); short rows = rejection. The bright-blue row is the POC (most-traded price), the shaded band the value area, the purple bracket the first hour. The purple column at the right merges every visible session into one composite. Scroll to zoom the price axis, drag to pan, double-click to reset.">i</button>
         <small>scroll = zoom · drag = pan · double-click = reset · click a column for letters drill-down</small></div>
       <div class="wb-controls">
         <span class="wb-group"><span class="wb-lbl">Days</span><span class="seg" id="wb-days">
@@ -418,9 +419,6 @@ async function loadProfile() {
           <button data-v="rth" ${wb.session === "rth" ? 'class="active"' : ""}>RTH</button>
           <button data-v="eth" ${wb.session === "eth" ? 'class="active"' : ""}>Globex</button>
           <button data-v="all" ${wb.session === "all" ? 'class="active"' : ""}>24h</button></span></span>
-        <span class="wb-group"><span class="wb-lbl">View</span><span class="seg" id="wb-mode">
-          ${[["tpo", "TPO"], ["letters", "Letters"], ["vol", "Volume"], ["dlt", "Delta"], ["heat", "Heatmap"], ["split", "IB Split"]]
-            .map(([k, l]) => `<button data-v="${k}" ${wb.mode === k ? 'class="active"' : ""}>${l}</button>`).join("")}</span></span>
         <span class="wb-group"><span class="wb-lbl">Value</span><span class="seg" id="wb-va">
           ${[68, 70, 80].map(v => `<button data-v="${v}" ${wb.va === v ? 'class="active"' : ""}>${v}%</button>`).join("")}</span></span>
         <span class="wb-group"><span class="wb-lbl">Ticks/row</span><select id="wb-tpr">
@@ -459,7 +457,6 @@ function wireWorkbenchControls() {
   });
   wire("wb-days", b => { wb.days = parseInt(b.dataset.v, 10); fetchWorkbench(); });
   wire("wb-session", b => { wb.session = b.dataset.v; fetchWorkbench(); });
-  wire("wb-mode", b => { wb.mode = b.dataset.v; drawWorkbench(); });
   wire("wb-va", b => { wb.va = parseInt(b.dataset.v, 10); fetchWorkbench(); });
   const tpr = $("#wb-tpr");
   if (tpr) tpr.onchange = () => { wb.tpr = parseInt(tpr.value, 10); wb.view = null; fetchWorkbench(); };
@@ -479,12 +476,10 @@ async function fetchWorkbench() {
     drawWorkbench();
     renderWbStats();
     const lg = $("#wb-legend");
-    if (lg) lg.innerHTML = `<b class="num">${d.ticks_per_row} tick${d.ticks_per_row > 1 ? "s" : ""}/row (${fmt(d.step, 4)} pts)</b> ·
-      <span class="lg" style="background:${WB_COLORS.bar}"></span> outside value
-      <span class="lg" style="background:${WB_COLORS.va}"></span> value area
-      <span class="lg" style="background:${WB_COLORS.poc}"></span> POC
-      <span class="lg" style="background:${WB_COLORS.single}"></span> single prints / IB
-      &nbsp;·&nbsp; ${esc(d.legend.modes)} ${esc(d.legend.naked)}`;
+    if (lg) lg.innerHTML = `<b class="num">${d.ticks_per_row} tick${d.ticks_per_row > 1 ? "s" : ""}/row (${fmt(d.step, 4)} pts)</b>
+      · <span style="color:#00b2ff">■</span> POC row · shaded = value area · <span style="color:#bf5af2">|</span> Initial Balance
+      · <span style="color:#30d158">▶</span> open <span style="color:#fff">◀</span> close · <span style="color:#64d2ff">◆</span> VWAP
+      · <span style="color:#ffd60a">- - -</span> naked POC ray · ${esc(d.legend.naked)}`;
   } catch (e) {
     if (st) { st.style.display = ""; st.innerHTML = errBox("Workbench failed: " + e.message, "Needs intraday history — retry if the free feed is rate-limited."); }
   }
@@ -554,136 +549,81 @@ function drawWorkbench() {
 
   const pocTrail = [], vwapTrail = [];
 
-  const subCounts = (s, fromP, toP) => {
-    const out = new Array(n).fill(0);
-    (s.period_ranges || []).slice(fromP, toP).forEach(([a, b]) => {
-      for (let i = a; i <= b; i++) out[i]++;
-    });
-    return out;
-  };
-
   sessions.forEach((s, si) => {
-    const x0 = padL + si * colW + 3;
-    const usable = colW - 10;
-    const mode = wb.mode;
+    const x0 = padL + si * colW + 4;
+    const usable = colW - 12;
+    const periods = s.period_ranges || [];
+    const nP = Math.max(periods.length, 1);
 
-    if (wb.show.vaBand && mode !== "heat") {
-      ctx.fillStyle = "rgba(100,210,255,.06)";
+    // value-area band
+    if (wb.show.vaBand) {
+      ctx.fillStyle = "rgba(100,210,255,.07)";
       const yTop = Math.max(padT, yOf(grid[s.vah_i]) - rowH / 2);
       const yBot = Math.min(H - padB, yOf(grid[s.val_i]) + rowH / 2);
-      if (yBot > yTop) ctx.fillRect(x0 - 2, yTop, colW - 6, yBot - yTop);
+      if (yBot > yTop) ctx.fillRect(x0 - 3, yTop, colW - 7, yBot - yTop);
     }
 
-    if (mode === "letters") {
-      const periods = s.period_ranges || [];
-      const nP = Math.max(periods.length, 1);
-      const volW = Math.min(60, usable * 0.30);
-      const lettersW = usable - volW - 5;
-      const cellH = Math.max(2, Math.min(rowH - 0.8, 17));
-      const cellW = Math.max(3, Math.min(cellH * 0.95, lettersW / Math.min(nP, 11)));
-      const maxFit = Math.max(1, Math.floor(lettersW / cellW));
-      const maxV = Math.max(...s.vol, 1);
-      const fontPx = Math.min(cellH - 4, 10.5);
-      for (let i = s.lo_i; i <= s.hi_i; i++) {
-        if (!inView(i) || !s.tpo[i]) continue;
-        const yC = yOf(grid[i]);
-        if (yC < padT - rowH || yC > H - padB + rowH) continue;
-        let x = x0, drawn = 0, overflow = false;
-        for (let p = 0; p < nP; p++) {
-          const [a, b] = periods[p];
-          if (i < a || i > b) continue;
-          if (drawn >= maxFit) { overflow = true; break; }
-          ctx.fillStyle = i === s.poc_i ? "#00b2ff" : periodColor(p, nP);
-          cellPath(ctx, x, yC - cellH / 2, cellW - 1.2, cellH, Math.min(3.5, cellH / 3));
-          ctx.fill();
-          if (cellH >= 8.5) {
-            ctx.fillStyle = "rgba(255,255,255,.95)";
-            ctx.font = `600 ${fontPx}px JetBrains Mono`;
-            ctx.fillText(WB_LETTERS[p] || "+", x + (cellW - 1.2) / 2 - fontPx * 0.3, yC + fontPx * 0.36);
-          }
-          x += cellW; drawn++;
+    // TPO letter prints
+    const cellH = Math.max(2, Math.min(rowH - 0.8, 18));
+    const cellW = Math.max(3, Math.min(cellH * 0.95, usable / Math.min(nP, 13)));
+    const maxFit = Math.max(1, Math.floor(usable / cellW));
+    const fontPx = Math.min(cellH - 4, 11);
+    for (let i = s.lo_i; i <= s.hi_i; i++) {
+      if (!inView(i) || !s.tpo[i]) continue;
+      const yC = yOf(grid[i]);
+      if (yC < padT - rowH || yC > H - padB + rowH) continue;
+      let x = x0, drawn = 0, overflow = false;
+      for (let p = 0; p < nP; p++) {
+        const [a, b] = periods[p];
+        if (i < a || i > b) continue;
+        if (drawn >= maxFit) { overflow = true; break; }
+        ctx.fillStyle = i === s.poc_i ? "#00b2ff" : periodColor(p, nP);
+        cellPath(ctx, x, yC - cellH / 2, cellW - 1.2, cellH, Math.min(3.5, cellH / 3));
+        ctx.fill();
+        if (cellH >= 8.5) {
+          ctx.fillStyle = "rgba(255,255,255,.95)";
+          ctx.font = `600 ${fontPx}px JetBrains Mono`;
+          ctx.fillText(WB_LETTERS[p] || "+", x + (cellW - 1.2) / 2 - fontPx * 0.3, yC + fontPx * 0.36);
         }
-        if (overflow && cellH >= 8.5) { ctx.fillStyle = "#9a9aa2"; ctx.fillText("\u203a", x + 1, yC + 3); }
-        // buy/sell split volume bar beside the prints
-        const vb = s.vol[i] || 0;
-        if (vb > 0) {
-          const buy = Math.max(0, Math.min(vb, (vb + (s.dlt[i] || 0)) / 2));
-          const bw = vb / maxV * volW;
-          const vx = x0 + lettersW + 5;
-          const bh = Math.max(1.5, Math.min(rowH - 1, cellH * 0.6));
-          ctx.fillStyle = "rgba(48,209,88,.78)";
-          ctx.fillRect(vx, yC - bh / 2, bw * (buy / vb), bh);
-          ctx.fillStyle = "rgba(255,69,58,.78)";
-          ctx.fillRect(vx + bw * (buy / vb), yC - bh / 2, bw * (1 - buy / vb), bh);
-        }
+        x += cellW; drawn++;
       }
-      // VAH / VAL / POC guides on the column
-      ctx.font = "9px JetBrains Mono";
-      [["VAH", s.vah_i, "#64d2ff"], ["POC", s.poc_i, "#00b2ff"], ["VAL", s.val_i, "#64d2ff"]].forEach(([lbl, idx, col]) => {
-        const y = yOf(grid[idx]);
-        if (y < padT || y > H - padB) return;
-        ctx.strokeStyle = col; ctx.beginPath();
-        ctx.moveTo(x0 - 6, y); ctx.lineTo(x0 - 1, y); ctx.stroke();
-        if (colW > 120) { ctx.fillStyle = col; ctx.fillText(lbl, x0 - 6, y - 3); }
-      });
-    } else if (mode === "heat") {
-      const maxV = Math.max(...s.vol, 1);
-      for (let i = s.lo_i; i <= s.hi_i; i++) {
-        if (!inView(i) || !s.vol[i]) continue;
-        const a = Math.pow(s.vol[i] / maxV, 0.6);
-        ctx.fillStyle = `rgba(100,210,255,${(a * 0.92).toFixed(3)})`;
-        ctx.fillRect(x0 - 2, yOf(grid[i]) - rowH / 2 + 0.5, colW - 6, Math.max(1, rowH - 0.5));
-      }
-      // POC marker on heat
-      ctx.fillStyle = "#ffd60a";
-      ctx.fillRect(x0 - 2, yOf(grid[s.poc_i]) - 1, colW - 6, 2);
-    } else if (mode === "split") {
-      const ib = subCounts(s, 0, 2), post = subCounts(s, 2, 999);
-      const maxI = Math.max(...ib, 1), maxP = Math.max(...post, 1);
-      const half = usable / 2 - 1;
-      for (let i = s.lo_i; i <= s.hi_i; i++) {
-        if (!inView(i)) continue;
-        const y = yOf(grid[i]) - rowH / 2 + 0.5, h = Math.max(1, rowH - 1);
-        if (ib[i]) { ctx.fillStyle = "#bf5af2"; ctx.fillRect(x0, y, Math.max(1.5, ib[i] / maxI * half), h); }
-        if (post[i]) { ctx.fillStyle = "#4a82b8"; ctx.fillRect(x0 + half + 2, y, Math.max(1.5, post[i] / maxP * half), h); }
-      }
-    } else if (mode === "dlt") {
-      const maxA = Math.max(...s.dlt.map(Math.abs), 1);
-      for (let i = s.lo_i; i <= s.hi_i; i++) {
-        if (!inView(i) || !s.dlt[i]) continue;
-        ctx.fillStyle = s.dlt[i] > 0 ? "#30d158" : "#ff453a";
-        ctx.fillRect(x0, yOf(grid[i]) - rowH / 2 + 0.5,
-          Math.max(1.5, Math.abs(s.dlt[i]) / maxA * usable), Math.max(1, rowH - 1));
-      }
-    } else {
-      const arr = mode === "vol" ? s.vol : s.tpo;
-      const maxV = Math.max(...arr, 1);
-      for (let i = s.lo_i; i <= s.hi_i; i++) {
-        if (!inView(i) || !arr[i]) continue;
-        const w = Math.max(1.5, arr[i] / maxV * usable);
-        ctx.fillStyle = i === s.poc_i ? "#ffd60a"
-          : (wb.show.singles && s.singles_i.includes(i)) ? "#bf5af2"
-          : (i >= s.val_i && i <= s.vah_i) ? "#4a82b8" : "#3c5878";
-        ctx.fillRect(x0, yOf(grid[i]) - rowH / 2 + 0.5, w, Math.max(1, rowH - 1));
-      }
+      if (overflow && cellH >= 8.5) { ctx.fillStyle = "#9a9aa2"; ctx.fillText("›", x + 1, yC + 3); }
     }
+
+    // singles markers
+    if (wb.show.singles) {
+      ctx.fillStyle = "#bf5af2";
+      s.singles_i.forEach(i => {
+        if (inView(i)) ctx.fillRect(x0 - 3, yOf(grid[i]) - 1, 2, 2);
+      });
+    }
+
+    // VAH / POC / VAL guides
+    ctx.font = "9px JetBrains Mono";
+    [["VAH", s.vah_i, "#64d2ff"], ["POC", s.poc_i, "#00b2ff"], ["VAL", s.val_i, "#64d2ff"]].forEach(([lbl, idx, col]) => {
+      const y = yOf(grid[idx]);
+      if (y < padT || y > H - padB) return;
+      ctx.strokeStyle = col; ctx.beginPath();
+      ctx.moveTo(x0 - 7, y); ctx.lineTo(x0 - 2, y); ctx.stroke();
+      if (colW > 130) { ctx.fillStyle = col; ctx.fillText(lbl, x0 - 7, y - 3); }
+    });
 
     // IB bracket
-    if (wb.show.ib && mode !== "split") {
+    if (wb.show.ib) {
       ctx.strokeStyle = "#bf5af2"; ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(x0 - 2, Math.max(padT, yOf(s.ib_hi))); ctx.lineTo(x0 - 2, Math.min(H - padB, yOf(s.ib_lo))); ctx.stroke();
+      ctx.moveTo(x0 - 3, Math.max(padT, yOf(s.ib_hi))); ctx.lineTo(x0 - 3, Math.min(H - padB, yOf(s.ib_lo))); ctx.stroke();
       ctx.lineWidth = 1;
     }
     // open / close markers
     if (wb.show.oc) {
       if (s.open >= vLo && s.open <= vHi) {
         ctx.fillStyle = "#30d158";
-        ctx.beginPath(); ctx.moveTo(x0 - 1, yOf(s.open)); ctx.lineTo(x0 + 5, yOf(s.open) - 3); ctx.lineTo(x0 + 5, yOf(s.open) + 3); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x0 - 2, yOf(s.open)); ctx.lineTo(x0 + 4, yOf(s.open) - 3.5); ctx.lineTo(x0 + 4, yOf(s.open) + 3.5); ctx.fill();
       }
       if (s.close >= vLo && s.close <= vHi) {
         ctx.fillStyle = "#fff";
-        ctx.fillRect(x0 + usable - 6, yOf(s.close) - 1, 8, 2);
+        ctx.beginPath(); ctx.moveTo(x0 + usable + 4, yOf(s.close)); ctx.lineTo(x0 + usable - 2, yOf(s.close) - 3.5); ctx.lineTo(x0 + usable - 2, yOf(s.close) + 3.5); ctx.fill();
       }
     }
     // VWAP marker
@@ -713,10 +653,10 @@ function drawWorkbench() {
     ctx.fillText(`RF${s.rf > 0 ? "+" : ""}${s.rf}`, x0, H - padB + 38);
   });
 
-  // composite column
-  const comp = wb.mode === "vol" || wb.mode === "heat" ? d.composite.vol : d.composite.tpo;
-  const cx0 = padL + sessions.length * colW + 3;
-  const cUsable = colW - 10;
+  // composite column (merged TPO of the selection)
+  const comp = d.composite.tpo;
+  const cx0 = padL + sessions.length * colW + 4;
+  const cUsable = colW - 12;
   const maxC = Math.max(...comp, 1);
   for (let i = 0; i < n; i++) {
     if (!inView(i) || !comp[i]) continue;
@@ -1045,47 +985,152 @@ async function loadNews(refreshOnly = false) {
 }
 
 /* ---------- central banks ---------- */
+function drawLineChart(canvasId, seriesList, opts = {}) {
+  const cv = $("#" + canvasId); if (!cv || !seriesList.length) return;
+  const ctx = cv.getContext("2d");
+  const W = cv.width = cv.clientWidth || 600, H = cv.height, padL = 36, padB = 18, padT = 8, padR = 6;
+  ctx.clearRect(0, 0, W, H);
+  const all = seriesList.flatMap(s => s.points.map(p => p.v));
+  if (!all.length) return;
+  const min = Math.min(...all), max = Math.max(...all), span = (max - min) || 1;
+  const maxLen = Math.max(...seriesList.map(s => s.points.length));
+  const x = i => padL + i / Math.max(maxLen - 1, 1) * (W - padL - padR);
+  const y = v => padT + (1 - (v - min) / span) * (H - padT - padB);
+  ctx.font = "9.5px JetBrains Mono"; ctx.fillStyle = "#6e6e76";
+  for (let g = 0; g <= 4; g++) {
+    const v = min + span * g / 4, yy = y(v);
+    ctx.strokeStyle = "#1d1d22"; ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
+    ctx.fillText(fmt(v, 2), 2, yy + 3);
+  }
+  const lbls = seriesList[0].points;
+  for (let i = 0; i < lbls.length; i += Math.max(1, Math.floor(lbls.length / 6))) {
+    ctx.fillText(String(lbls[i].t).slice(0, 7), x(i + (maxLen - lbls.length)), H - 4);
+  }
+  seriesList.forEach(s => {
+    const off = maxLen - s.points.length;
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1.8; ctx.beginPath();
+    s.points.forEach((p, i) => i ? ctx.lineTo(x(i + off), y(p.v)) : ctx.moveTo(x(i + off), y(p.v)));
+    ctx.stroke();
+  });
+  ctx.lineWidth = 1;
+}
+
+const CB_COLORS = {fed: "#0a84ff", ecb: "#ffd60a", boj: "#ff453a", boe: "#30d158"};
+
 async function loadCB() {
   const el = $("#macro-body");
-  el.innerHTML = `<div class="loading">Reading rate markets…</div>`;
+  el.innerHTML = `<div class="loading">Loading central-bank intelligence… (policy histories + wires, first run ~15s)</div>`;
   try {
     const [d, corr] = await Promise.all([api("/central-banks"), api("/correlations")]);
-    if (!d.fedwatch) { el.innerHTML = errBox(d.error || "central bank data unavailable"); return; }
-    const fw = d.fedwatch;
-    const meetings = (fw.meetings || []).map(m => m.ok ? `
-      <tr><td class="num">${esc(m.meeting)}</td><td class="num">${m.days_until}d</td>
-      <td class="num">${fmt(m.implied_post_rate, 2)}%</td>
-      <td class="num ${cls(m.implied_change_bp)}">${sign(m.implied_change_bp)}${fmt(m.implied_change_bp, 0)}bp</td>
-      <td class="num">${m.scenarios.map(s => `${s.move_bp >= 0 ? "+" : ""}${s.move_bp}bp: <b>${s.prob}%</b>`).join(" · ")}</td></tr>`
-      : `<tr><td class="num">${esc(m.meeting)}</td><td class="num">${m.days_until}d</td><td colspan="3" class="muted small">${esc(m.error)}</td></tr>`).join("");
+    if (!d.ok) { el.innerHTML = errBox(d.error || "central bank desk unavailable"); return; }
+    const fw = d.fedwatch || {};
+    const mon = d.monitor || {};
+
+    const monAlerts = (mon.alerts || []).map(a => `<div class="brief-warning crit">${esc(a.text)}</div>`).join("");
+    const monHtml = mon.ok ? `
+      <div class="kpi-row">
+        <div class="kpi"><div class="v ${cls(mon.current_bp)}">${sign(mon.current_bp)}${fmt(mon.current_bp, 1)}bp</div>
+          <div class="k">Implied move · next FOMC (${esc(mon.meeting || "")})</div></div>
+        <div class="kpi"><div class="v ${cls(mon.shift_30m)}">${mon.shift_30m == null ? "—" : sign(mon.shift_30m) + fmt(mon.shift_30m, 1) + "bp"}</div>
+          <div class="k">Repricing · last 30 min</div></div>
+        <div class="kpi"><div class="v ${cls(mon.shift_session)}">${mon.shift_session == null ? "—" : sign(mon.shift_session) + fmt(mon.shift_session, 1) + "bp"}</div>
+          <div class="k">Repricing · this session</div></div>
+      </div>
+      ${(mon.history || []).length > 3 ? `<canvas id="mon-canvas" height="70"></canvas>` : `<p class="muted small">Intraday repricing history builds as the app runs — alerts fire automatically when the next meeting moves ≥3bp in 30 minutes.</p>`}`
+      : `<p class="muted small">Monitor needs the ZQ feed — it activates when Fed Funds futures quotes are reachable.</p>`;
+
+    const meetings = (fw.meetings || []).map(m => {
+      if (!m.ok) return `<tr><td class="num">${esc(m.meeting)}</td><td class="num">${m.days_until}d</td><td colspan="3" class="muted small">${esc(m.error)}</td></tr>`;
+      const segs = (m.scenarios || []).filter(s => s.prob > 1).map(s =>
+        `<span class="prob-seg ${s.move_bp < 0 ? "cut" : s.move_bp > 0 ? "hike" : "hold"}" style="width:${Math.max(s.prob, 7)}%">${s.move_bp === 0 ? "hold" : (s.move_bp > 0 ? "+" : "") + s.move_bp + "bp"} ${fmt(s.prob, 0)}%</span>`).join("");
+      return `<tr><td class="num">${esc(m.meeting)}</td><td class="num">${m.days_until}d</td>
+        <td class="num">${fmt(m.implied_post_rate, 2)}%</td>
+        <td class="num ${cls(m.implied_change_bp)}">${sign(m.implied_change_bp)}${fmt(m.implied_change_bp, 0)}bp</td>
+        <td style="min-width:220px"><div class="prob-bar">${segs}</div></td></tr>`;
+    }).join("");
+
+    const stanceChip = s => s === "hiking" ? `<span class="badge high">hiking</span>`
+      : s === "cutting" ? `<span class="badge fresh">cutting</span>` : `<span class="badge medium">holding</span>`;
+    const bankCards = (d.banks || []).map(b => `
+      <div class="panel bank-card">
+        <div class="panel-title"><span class="cb-dot" style="background:${CB_COLORS[b.key]}"></span>${esc(b.name)}
+          ${stanceChip(b.stance)}
+          <button class="info" data-info="${esc(b.watch)}">i</button></div>
+        <div class="bank-row">
+          <div><div class="v num" style="font-size:26px;font-weight:700">${b.rate != null ? fmt(b.rate, 2) + "%" : "—"}</div>
+            <div class="muted small">policy rate${b.rate_1y_ago != null ? ` · 1y ago ${fmt(b.rate_1y_ago, 2)}%` : ""}</div></div>
+          <canvas id="spark-${b.key}" class="spark" height="46" style="max-width:160px"></canvas>
+        </div>
+        <div class="small mt8">
+          ${b.next_meeting ? `Next decision: <b>${esc(b.next_meeting.date)}</b> (${b.next_meeting.days_until}d)${b.next_meeting.approx ? " <span class='muted'>~verify</span>" : ""} · <span class="muted">${esc(b.decision_time)}</span>` : ""}
+        </div>
+        ${b.fx ? `<div class="small mt8">Market lens: <b class="num">${esc(b.fx.symbol)}</b> ${fmt(b.fx.last, 5)}
+          <span class="${cls(b.fx.change_pct)} num">${sign(b.fx.change_pct)}${fmt(b.fx.change_pct, 2)}%</span>
+          <span class="muted">— this future reprices ${esc(b.short)} expectations in real time</span></div>` : ""}
+        ${(b.news || []).length ? `<div class="mt8">${b.news.slice(0, 4).map(nn => `
+          <div class="news-item" style="padding:6px 2px"><span class="t small"><a href="${esc(nn.link)}" target="_blank" rel="noopener">${esc(nn.title)}</a></span>
+          <span class="news-meta">${nn.age_min != null ? nn.age_min + "m" : ""}</span></div>`).join("")}</div>`
+          : `<p class="muted small mt8">wires unreachable right now</p>`}
+      </div>`).join("");
+
+    const div = (d.divergences || []).map(v => `
+      <div class="setup-card"><h4>${esc(v.pair)}: <span class="num">${sign(v.differential)}${fmt(v.differential, 2)}%</span>
+        <code>${esc(v.fx_future)}</code></h4>
+      <p class="small mt8">${esc(v.read)}</p></div>`).join("");
+
     const yc = d.yield_curve || {};
     const ycHtml = yc.ok ? (yc.points || []).map(p =>
       `<span class="num" style="margin-right:18px"><b>${esc(p.tenor)}</b> ${fmt(p.yield, 2)}% <span class="${cls(p.chg_bp)}">${sign(p.chg_bp)}${fmt(p.chg_bp, 1)}bp</span></span>`).join("")
-      + (yc.spread_3m10y_bp != null ? `<p class="mt8 small">3M/10Y spread: <b class="${cls(yc.spread_3m10y_bp)}">${fmt(yc.spread_3m10y_bp, 0)}bp</b>${yc.spread_3m10y_bp < 0 ? " (inverted)" : ""}</p>` : "")
+      + (yc.spread_3m10y_bp != null ? `<p class="mt8 small">3M/10Y spread: <b class="${cls(yc.spread_3m10y_bp)}">${fmt(yc.spread_3m10y_bp, 0)}bp</b>${yc.spread_3m10y_bp < 0 ? " (inverted — historically a recession signal)" : ""}</p>` : "")
       : `<span class="muted small">yield data unavailable</span>`;
-    let corrHtml = errBox(corr.error || "correlations unavailable");
+
+    let corrHtml = "";
     if (corr.ok) {
-      const color = v => v == null ? "#1d2733" : v > 0 ? `rgba(52,211,153,${Math.abs(v) * 0.6})` : `rgba(251,93,108,${Math.abs(v) * 0.6})`;
+      const color = v => v == null ? "#1d2733" : v > 0 ? `rgba(48,209,88,${Math.abs(v) * 0.55})` : `rgba(255,69,58,${Math.abs(v) * 0.55})`;
       corrHtml = `<div style="overflow-x:auto"><table><tr><th></th>${corr.symbols.map(s => `<th class="num">${esc(s)}</th>`).join("")}</tr>` +
         corr.symbols.map((s, i) => `<tr><th class="num">${esc(s)}</th>` +
           corr.matrix[i].map(v => `<td class="corr-cell" style="background:${color(v)}">${v == null ? "—" : v.toFixed(2)}</td>`).join("") + "</tr>").join("") + "</table></div>";
-      if ((corr.regime_shifts || []).length) corrHtml += `<div class="mt12"><b>⚠ Regime shifts (vs prior ${corr.window}d window)</b><ul class="clean small">` +
+      if ((corr.regime_shifts || []).length) corrHtml += `<div class="mt12"><b>Regime shifts (vs prior ${corr.window}d)</b><ul class="clean small">` +
         corr.regime_shifts.map(r => `<li><b>${esc(r.pair)}</b>: ${r.before.toFixed(2)} → ${r.now.toFixed(2)}</li>`).join("") + `</ul></div>`;
-      corrHtml += `<p class="mt8 muted small">${esc(corr.note)}</p>`;
     }
+
     el.innerHTML = `
-      <div class="panel"><div class="panel-title">FedWatch — Implied Rate Path <small>${esc(fw.method || "")}</small></div>
-        <p class="small">Current implied rate: <b class="num accent">${fmt(fw.current_implied_rate, 2)}%</b></p>
-        <table class="mt8"><tr><th>Meeting</th><th>In</th><th>Implied post-rate</th><th>Change</th><th>Probabilities</th></tr>${meetings}</table>
-        <ul class="clean small mt12">${(fw.playbook || []).map(p => `<li>${esc(p)}</li>`).join("")}</ul></div>
+      ${monAlerts}
+      <div class="panel"><div class="panel-title">⚡ Live Repricing Monitor
+        <button class="info" data-info="Tracks the market-implied size of the next Fed decision, recomputed from Fed Funds futures every minute the app is open. When new information hits (a data print, a headline, a speech), this number moves FIRST — before most charts make it obvious. A ≥3bp repricing in 30 minutes fires an alert anywhere in the app.">i</button>
+        <small>implied next-meeting move, recomputed continuously</small></div>${monHtml}</div>
+      <div class="panel"><div class="panel-title">Fed — Implied Rate Path
+        <button class="info" data-info="${esc(fw.method || "")} Each bar splits probability between the two nearest 25bp outcomes. Trade the GAP between this pricing and what gets delivered — and watch it reprice in real time on data releases.">i</button>
+        <small>current implied rate: <b class="num">${fmt(fw.current_implied_rate, 2)}%</b></small></div>
+        <table><tr><th>Meeting</th><th>In</th><th>Implied rate after</th><th>Move priced</th><th>Probabilities</th></tr>${meetings}</table></div>
+      <div class="grid2">${bankCards}</div>
+      <div class="panel"><div class="panel-title">Policy Rates — 10 Years, All Four Banks
+        <button class="info" data-info="Official policy rates from BIS data. The SPREAD between lines is what currency futures price: a widening Fed–BoJ gap historically means a falling 6J (weaker yen). When one line starts turning while another keeps going, the FX future between them usually trends for months — and repricings of that path are tradable intraday around their meetings.">i</button>
+        <small>${Object.entries(CB_COLORS).map(([k, c]) => `<span class="lg" style="background:${c}"></span>${k.toUpperCase()}`).join(" ")}</small></div>
+        <canvas id="cb-history" height="220"></canvas></div>
+      ${div ? `<div class="panel"><div class="panel-title">Rate Differentials → FX Futures
+        <button class="info" data-info="Currencies follow rate differentials. These cards turn the policy-rate gaps into the futures contract they drive, so a central-bank surprise can be traded through the cleanest instrument.">i</button></div>
+        <div class="grid3">${div}</div></div>` : ""}
       <div class="grid2">
-        <div class="panel"><div class="panel-title">Yield Curve</div>${ycHtml}
-          <div class="mt12"><b>Other Central Banks</b><table class="mt8"><tr><th>Bank</th><th>Cadence</th><th>What to watch</th></tr>
-          ${(d.other_banks || []).map(b => `<tr><td><b>${esc(b.bank)}</b></td><td class="small">${esc(b.cadence)}</td><td class="small">${esc(b.watch)}</td></tr>`).join("")}</table></div></div>
-        <div class="panel"><div class="panel-title">${esc((d.prep_process || {}).title || "CB Prep")}</div>
-          <ul class="clean">${((d.prep_process || {}).items || []).map(i => `<li>${esc(i)}</li>`).join("")}</ul></div>
+        <div class="panel"><div class="panel-title">US Yield Curve</div>${ycHtml}</div>
+        <div class="panel"><div class="panel-title">${esc((d.prep_process || {}).title || "Prep")}</div>
+          <ul class="clean small">${((d.prep_process || {}).items || []).map(i => `<li>${esc(i)}</li>`).join("")}</ul></div>
       </div>
-      <div class="panel"><div class="panel-title">Cross-Asset Correlations <small>rolling ${corr.window || 20}d, daily returns · green +, red −</small></div>${corrHtml}</div>`;
+      ${corrHtml ? `<div class="panel"><div class="panel-title">Cross-Asset Correlations <small>rolling ${corr.window}d · green +, red −</small></div>${corrHtml}</div>` : ""}
+      <p class="muted small">${esc(d.how_to_read || "")}</p>`;
+
+    // draw canvases
+    (d.banks || []).forEach(b => {
+      if ((b.history || []).length > 3)
+        drawLineChart(`spark-${b.key}`, [{color: CB_COLORS[b.key],
+          points: b.history.slice(-60).map(h => ({t: h.period, v: h.rate}))}]);
+    });
+    const hist = (d.banks || []).filter(b => (b.history || []).length > 3)
+      .map(b => ({color: CB_COLORS[b.key], points: b.history.map(h => ({t: h.period, v: h.rate}))}));
+    if (hist.length) drawLineChart("cb-history", hist);
+    if ((mon.history || []).length > 3)
+      drawLineChart("mon-canvas", [{color: "#0a84ff",
+        points: mon.history.map(h => ({t: new Date(h.t * 1000).toLocaleTimeString("en-US", {hour: "2-digit", minute: "2-digit"}), v: h.bp}))}]);
   } catch (e) { el.innerHTML = errBox(e.message); }
 }
 
@@ -1255,6 +1300,77 @@ function drawEquity(curve) {
   ctx.fillStyle = grad; ctx.fill();
 }
 
+/* ---------- rithmic connection ---------- */
+async function loadRithmic() {
+  const body = $("#rithmic-body");
+  if (!body) return;
+  try {
+    const s = await api("/rithmic/status");
+    if (s.connected) {
+      const ticks = Object.entries(s.ticks || {}).map(([sym, t]) =>
+        `<div class="small num">${esc(sym)}: ${fmt(t.last, 4)} <span class="muted">(${fmt(t.bid, 2)} × ${fmt(t.ask, 2)})</span></div>`).join("");
+      body.innerHTML = `<div><span class="live-dot"></span> <b>LIVE — Rithmic (${esc(s.system)})</b>
+        <span class="muted small">as ${esc(s.user)} · up ${fmt((s.uptime_s || 0) / 60, 0)}m</span></div>
+        <div class="mt8">${ticks || "<span class='muted small'>waiting for first ticks…</span>"}</div>
+        <button class="danger-link mt8" id="rith-disc">disconnect</button>`;
+      $("#rith-disc").onclick = async () => { await fetch("/api/rithmic/disconnect", {method: "POST"}); loadRithmic(); };
+      return;
+    }
+    const blocked = s.serverless
+      ? `<p class="small" style="color:var(--amber)">This is the shared web deployment — live broker sockets need a persistent process. Run EdgeDesk locally (see README) and connect there.</p>` : "";
+    const lib = !s.lib_installed
+      ? `<p class="muted small">${esc(s.lib_info)}</p>` : "";
+    body.innerHTML = `
+      <div><span class="src-dot"></span> Delayed data (Yahoo) ${s.connecting ? "· <b class='accent'>connecting…</b>" : ""}</div>
+      ${s.error ? `<p class="small" style="color:var(--red)">${esc(s.error)}</p>` : ""}
+      ${blocked}${lib}
+      <details class="mt8"><summary class="small" style="cursor:pointer;color:var(--blue)">Connect Rithmic credentials (Apex, Lucid, TPT…)</summary>
+        <div class="sizer mt8">
+          <div style="grid-column:1/-1"><label>Rithmic user</label><input id="rith-user" autocomplete="off"></div>
+          <div style="grid-column:1/-1"><label>Password</label><input id="rith-pass" type="password" autocomplete="off"></div>
+          <div style="grid-column:1/-1"><label>System</label><select id="rith-sys">${(s.systems || []).map(x => `<option>${esc(x)}</option>`).join("")}</select></div>
+        </div>
+        <button class="primary mt8" id="rith-conn" style="width:100%">Connect</button>
+        <p class="muted small mt8">Credentials are stored only on the machine running EdgeDesk (data/rithmic.json, never committed or sent anywhere except Rithmic). Once connected, live ticks replace delayed quotes — the first step toward full DOM, tick delta and order routing.</p>
+      </details>`;
+    const btn = $("#rith-conn");
+    if (btn) btn.onclick = async () => {
+      btn.disabled = true; btn.textContent = "Connecting…";
+      const r = await fetch("/api/rithmic/connect", {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({user: $("#rith-user").value, password: $("#rith-pass").value, system: $("#rith-sys").value})});
+      const j = await r.json();
+      if (!j.ok) { body.insertAdjacentHTML("beforeend", errBox(j.error)); btn.disabled = false; btn.textContent = "Connect"; }
+      else setTimeout(loadRithmic, 2500);
+    };
+  } catch (e) { body.innerHTML = `<span class="muted small">status unavailable: ${esc(e.message)}</span>`; }
+}
+
+/* ---------- live alert toasts ---------- */
+function showToast(a) {
+  const stack = $("#toast-stack");
+  const t = document.createElement("div");
+  t.className = "toast " + esc(a.kind || "");
+  t.innerHTML = `<b>${a.kind === "rate-repricing" ? "⚡ Rates" : a.kind === "headline" ? "🚨 Headline" : "🔮 Repricing"}</b>
+    <span>${esc(a.text)}</span><button class="t-x">✕</button>`;
+  t.querySelector(".t-x").onclick = () => t.remove();
+  stack.appendChild(t);
+  setTimeout(() => t.remove(), 25000);
+}
+
+async function pollAlerts() {
+  try {
+    const d = await api("/alerts");
+    if (!d.ok) return;
+    const seen = new Set(JSON.parse(localStorage.getItem("edgedesk.alerts.seen") || "[]"));
+    (d.alerts || []).forEach(a => {
+      if (!a.id || seen.has(a.id)) return;
+      seen.add(a.id);
+      showToast(a);
+    });
+    localStorage.setItem("edgedesk.alerts.seen", JSON.stringify([...seen].slice(-300)));
+  } catch (e) { /* best effort */ }
+}
+
 /* ---------- boot ---------- */
 $$("#macro-seg button").forEach(b => b.onclick = () => {
   $$("#macro-seg button").forEach(x => x.classList.toggle("active", x === b));
@@ -1280,5 +1396,7 @@ document.addEventListener("click", ev => {
 
 initShell();
 loadTab("briefing");
-setInterval(() => { if (state.tab === "board") { loadBoard(); } }, 30000);
-setInterval(() => { if (state.tab === "news") loadNews(true); }, 120000);
+pollAlerts();
+setInterval(pollAlerts, 30000);
+setInterval(() => { if (state.tab === "board") { loadBoard(); } }, 15000);
+setInterval(() => { if (state.tab === "news") loadNews(true); }, 45000);

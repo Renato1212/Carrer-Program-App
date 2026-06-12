@@ -51,6 +51,10 @@
       </div>
       <div class="side-col">
         <div class="panel">
+          <div class="panel-title">Data Connection <button class="info" data-info="EdgeDesk runs on free delayed data by default. Connect Rithmic credentials from a prop-firm account (Apex, Lucid, Take Profit Trader and other Rithmic-based firms) to stream real-time exchange ticks into the board and order-flow tools — the first step toward EdgeDesk becoming a full trading front-end. Requires running EdgeDesk locally with the optional async_rithmic package installed.">i</button></div>
+          <div id="rithmic-body" class="small muted">Checking data source…</div>
+        </div>
+        <div class="panel">
           <div class="panel-title">Position Sizer <button class="info" data-info="Position size is derived from risk, never the other way around: this converts the dollars you are willing to lose (account × risk %) and your stop distance into a contract count. If one contract already risks more than your budget, the correct size is zero — pass, or find tighter structure.">i</button></div>
           <div class="sizer">
             <div><label>Account $</label><input id="sz-acct" type="number" value="50000" step="1000"></div>
@@ -102,6 +106,7 @@
 </main>
 
 <div id="popover" class="popover"></div>
+<div id="toast-stack"></div>
 <footer class="muted small">EdgeDesk · free data: Yahoo Finance, FairEconomy calendar, BLS, CNN F&amp;G, official RSS wires · quotes may be delayed · education &amp; infrastructure, not financial advice</footer>
 
 <script src="/static/js/app.js"></script>

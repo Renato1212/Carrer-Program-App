@@ -311,3 +311,32 @@ button.link { background: none; border: none; color: var(--blue); cursor: pointe
 .gex-pos { color: var(--green); font-weight: 700; } .gex-neg { color: var(--red); font-weight: 700; }
 .err { color: #ffb3ad; font: 12.5px var(--sans); padding: 11px 14px; background: #ff453a0d; border: 1px solid #ff453a33; border-radius: 10px; }
 canvas { width: 100%; display: block; }
+
+/* ---------- toasts / live alerts ---------- */
+#toast-stack { position: fixed; top: 70px; right: 16px; z-index: 200; display: flex;
+  flex-direction: column; gap: 9px; max-width: 380px; }
+.toast { background: rgba(35,35,40,.97); backdrop-filter: blur(16px); border: 1px solid var(--border);
+  border-left: 3px solid var(--blue); border-radius: 12px; padding: 11px 14px; font-size: 12.5px;
+  line-height: 1.5; box-shadow: var(--shadow); display: flex; gap: 8px; align-items: baseline;
+  animation: slideIn .25s cubic-bezier(.2,.7,.3,1); }
+.toast.headline { border-left-color: var(--red); }
+.toast.rate-repricing { border-left-color: var(--amber); }
+.toast .t-x { background: none; border: none; color: var(--muted); cursor: pointer; padding: 0 2px; margin-left: auto; }
+@keyframes slideIn { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
+
+/* ---------- central bank desk ---------- */
+.cb-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.bank-card .bank-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.spark { flex: 1; }
+.prob-bar { display: flex; gap: 2px; height: 20px; border-radius: 6px; overflow: hidden; }
+.prob-seg { font: 700 10px var(--mono); color: #fff; display: flex; align-items: center;
+  justify-content: center; white-space: nowrap; overflow: hidden; padding: 0 3px; }
+.prob-seg.cut { background: #2e9e6b; }
+.prob-seg.hike { background: #c84a54; }
+.prob-seg.hold { background: #4a5a6e; }
+
+/* ---------- data connection ---------- */
+.live-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--green); animation: pulse 1.4s infinite; vertical-align: baseline; }
+.src-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+details summary::-webkit-details-marker { display: none; }

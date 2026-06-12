@@ -74,4 +74,27 @@ labeled error in that panel, never a crash.
 - No tick/DOM data on free feeds — order-flow principles (Days 10–13) are
   delivered as structured playbooks rather than a live DOM.
 
+## Live data: connecting Rithmic (prop-firm accounts)
+
+EdgeDesk runs on free delayed data by default. If you have Rithmic credentials
+from a prop firm (Apex Trader Funding, Lucid Trading, Take Profit Trader, or
+any Rithmic-based firm), you can stream real-time exchange data into the app:
+
+1. Run EdgeDesk **locally** (live broker sockets cannot run on serverless
+   hosting like Vercel):
+   ```bash
+   pip install -r requirements.txt async_rithmic
+   uvicorn backend.main:app --port 8000
+   ```
+2. Open **Markets → Data Connection**, enter your Rithmic user, password and
+   the system name your firm gave you (e.g. `Apex`), and connect.
+3. Credentials are stored only in `data/rithmic.json` on your machine
+   (gitignored) and are sent nowhere except Rithmic's gateway.
+
+Roadmap opened by this connector: live ticks in the board and order-flow pulse
+(phase 1), true tick-based delta / DOM ladder / volume profile from real
+prints (phase 2), and order routing with bracket orders sized by the position
+sizer (phase 3). The connector uses the community `async_rithmic` library;
+exact symbol subscriptions may need adjusting per firm and contract month.
+
 This tool is infrastructure and education, not financial advice.
