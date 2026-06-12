@@ -2,7 +2,7 @@
 
 Automates the Day 8 pre-open routine: where did we close, where did we open
 relative to prior value/range, how is the overnight session shaping up, and
-what does the gap (if any) suggest (Day 3 gap principles).
+what does the gap (if any) suggest.
 Tracks 'first touch' freshness per Day 2 (prioritize first touches).
 """
 from __future__ import annotations
@@ -79,15 +79,15 @@ def key_levels(symbol: str) -> dict:
     add("Prior Day High", pdh, "structure", "Poor high behind it" if prior_tpo["poor_high"] else "")
     add("Prior Day Low", pdl, "structure", "Poor low behind it" if prior_tpo["poor_low"] else "")
     add("Prior Day Close", pdc, "structure")
-    add("Prior VAH", prior_tpo["vah"], "value", "First rejection of prior value is tradeable (Day 6)")
-    add("Prior VAL", prior_tpo["val"], "value", "First rejection of prior value is tradeable (Day 6)")
+    add("Prior VAH", prior_tpo["vah"], "value", "First rejection of prior value is tradeable")
+    add("Prior VAL", prior_tpo["val"], "value", "First rejection of prior value is tradeable")
     add("Prior POC", prior_tpo["poc"], "value", "Acceptance magnet - markets often retest before continuing")
     add("Prior IB High", prior_tpo["ib_high"], "structure")
     add("Prior IB Low", prior_tpo["ib_low"], "structure")
     add("Overnight High", on_high, "overnight", "Globex extreme - stops cluster behind it")
     add("Overnight Low", on_low, "overnight", "Globex extreme - stops cluster behind it")
-    add("Week High", week_high, "htf", "Higher timeframe level - more traders see it (Day 2)")
-    add("Week Low", week_low, "htf", "Higher timeframe level - more traders see it (Day 2)")
+    add("Week High", week_high, "htf", "Higher timeframe level - more traders see it")
+    add("Week Low", week_low, "htf", "Higher timeframe level - more traders see it")
     for s in prior_tpo["single_prints"][:5]:
         add("Single Print", s, "single", "Low-time acceptance - acceleration zone if revisited")
 
@@ -117,22 +117,22 @@ def opening_context(last, prior_tpo, pdh, pdl, pdc, on_high, on_low, cur_day, se
     if val <= ref <= vah:
         zone = "inside prior value"
         bias = ("Acceptance - expect rotation inside value. Lower conviction day: fade value edges, "
-                "play to the POC. Breakouts need clear initiative activity to trust (Day 6/8).")
+                "play to the POC. Breakouts need clear initiative activity to trust.")
     elif pdl <= ref <= pdh:
         zone = "outside value, inside range"
         bias = ("Mild imbalance. Watch the first test of prior value: first rejection = trade away from value; "
-                "acceptance back inside = rotation through value to the other side (Day 6).")
+                "acceptance back inside = rotation through value to the other side.")
     else:
         zone = "outside prior range (gap)"
         gap_size = abs(ref - pdc)
         gap_atr = gap_size / rng if rng else 0
         if gap_atr < 0.35:
             bias = ("Gap just outside the range: best breakout entry is right at the open - trapped traders "
-                    "exit while breakout buyers/sellers chase (Day 3). Failure back inside the range = "
+                    "exit while breakout buyers/sellers chase. Failure back inside the range = "
                     "look-above/below-and-fail rotation.")
         else:
             bias = ("Extended gap far from the range: positioned winners take profits at the open while "
-                    "responsive traders fade the extension - especially near a strong HTF zone (Day 3). "
+                    "responsive traders fade the extension - especially near a strong HTF zone. "
                     "Let the first minutes show who's in control before committing.")
         zone += f" ({'+' if ref > pdc else '-'}{round(gap_size, 2)} vs prior close, {round(gap_atr * 100)}% of prior range)"
 
@@ -146,4 +146,4 @@ def opening_context(last, prior_tpo, pdh, pdl, pdc, on_high, on_low, cur_day, se
     return {"reference": round(ref, 4), "reference_source": src, "zone": zone, "bias": bias,
             "overnight_note": on_note,
             "first_hour_rule": ("Read the Initial Balance for directional conviction - unless something changes, "
-                                "lean with that direction for the session (Day 8).")}
+                                "lean with that direction for the session.")}

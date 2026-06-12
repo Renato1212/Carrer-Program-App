@@ -1,5 +1,4 @@
-"""Rolling cross-asset correlation matrix - regime awareness (Day 1:
-always be aware of environment and context).
+"""Rolling cross-asset correlation matrix - regime awareness.
 """
 from __future__ import annotations
 

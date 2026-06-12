@@ -119,19 +119,19 @@ def classify_day_type(o, c, hi, lo, ibh, ibl, counts, prices) -> dict:
     if ext_up > 0.10 and ext_dn > 0.10:
         t = "neutral"
         note = ("Both IB extremes extended - responsive traders in control. "
-                "Watch for failed auction: the side that breaks and fails fuels the other side (Day 8).")
+                "Watch for failed auction: the side that breaks and fails fuels the other side.")
     elif ib_rng / rng < 0.35 and ((close_loc > 0.75 and ext_up > 0.3) or (close_loc < 0.25 and ext_dn > 0.3)):
         t = "trend"
         note = ("Small IB + healthy continuation = trend day. Enter on small pullbacks showing "
-                "absorption; expect a more balanced day tomorrow (Day 7).")
+                "absorption; expect a more balanced day tomorrow.")
     elif center_loc > 0.62:
         t = "P-shape"
         note = ("P-shape (short-covering / liquidation up). Position near the bottom of the upper "
-                "balance, target the middle or other end (Day 7).")
+                "balance, target the middle or other end.")
     elif center_loc < 0.38:
         t = "b-shape"
         note = ("b-shape (long liquidation). Position near the top of the lower balance, "
-                "target middle/other end (Day 7).")
+                "target middle/other end.")
     elif ext_up < 0.05 and ext_dn < 0.05:
         t = "balanced"
         note = "IB held the day - rotational. Fade edges, play to the middle; breakouts need initiative volume."
@@ -143,7 +143,7 @@ def classify_day_type(o, c, hi, lo, ibh, ibl, counts, prices) -> dict:
 
 
 def failed_auction(session_df: pd.DataFrame, ibh: float, ibl: float) -> dict | None:
-    """Detect a break of the IB extreme that came back inside (Day 8's favorite play)."""
+    """Detect a break of the IB extreme that came back inside."""
     post_ib = session_df.iloc[2:]
     if post_ib.empty:
         return None
@@ -159,12 +159,12 @@ def failed_auction(session_df: pd.DataFrame, ibh: float, ibl: float) -> dict | N
                 if back_in:
                     return {"side": side, "level": lvl,
                             "note": f"Failed auction at IB {side}: break was rejected. Liquidation of trapped "
-                                    f"traders gives fuel toward the other side of the range (Day 8)."}
+                                    f"traders gives fuel toward the other side of the range."}
     return None
 
 
 def volume_profile(symbol: str, session_df: pd.DataFrame, bins: int = 40) -> dict:
-    """Volume-at-price from intraday bars + HVN/LVN detection (Day 6)."""
+    """Volume-at-price from intraday bars + HVN/LVN detection."""
     hi, lo = float(session_df.High.max()), float(session_df.Low.min())
     if hi <= lo:
         return {"ok": False, "error": "flat session"}
@@ -204,7 +204,7 @@ def volume_profile(symbol: str, session_df: pd.DataFrame, bins: int = 40) -> dic
         "val": round(float(mids[min(va)]), 4),
         "hvn": hvn, "lvn": lvn,
         "note": ("HVNs = acceptance: expect a retest then continuation through if price spends time back inside. "
-                 "LVNs = rejection edges: use as S/R in balance, and as acceleration zones once broken (Day 6)."),
+                 "LVNs = rejection edges: use as S/R in balance, and as acceleration zones once broken."),
     }
 
 

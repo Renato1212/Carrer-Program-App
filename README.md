@@ -1,14 +1,16 @@
-# EdgeDesk — Futures Day Trader Command Center
+# EdgeDesk — Futures Trading Terminal
 
-A free-data, self-hosted trading infrastructure built around the 14-day Career
-Program. It turns the program's principles into running software: automated
-pre-market briefings, Market Profile / TPO analytics, a CME-FedWatch-style rate
-engine, dealer gamma (GEX) maps, a severity-scored news radar, a scheduled-news
-war calendar, and a journal that audits your trades against the program's rules.
+A free-data, self-hosted terminal for discretionary futures intraday traders —
+a Bloomberg/NewsSquawk-style workflow built on auction-market principles:
+market profile & volume analysis, headline news squawk, market sentiment,
+scheduled data with real values, and central-bank analysis.
 
 **100% free data.** Yahoo Finance (quotes, intraday history, option chains,
-Fed Funds futures), official central-bank & financial-media RSS wires, and
-rule-generated calendars. No API keys, no subscriptions, no paid feeds.
+Fed Funds futures), FairEconomy/ForexFactory economic calendar (forecast &
+previous values), BLS API (latest actual US prints), CNN Fear & Greed,
+alternative.me crypto sentiment, Polymarket & Kalshi prediction markets, and
+official central-bank & financial-media RSS wires. No API keys, no
+subscriptions, no paid feeds.
 
 ---
 

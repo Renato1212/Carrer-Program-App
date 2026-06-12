@@ -138,19 +138,19 @@ def metrics() -> dict:
     unplanned = sum(1 for t in trades if not t["planned"])
     big_losses = [t for t in trades if rs and t["r_multiple"] is not None and t["r_multiple"] <= -1.5]
     if no_stop:
-        audits.append(f"{no_stop} trade(s) logged without a stop - undefined risk breaks every Day 5 asymmetry rule.")
+        audits.append(f"{no_stop} trade(s) logged without a stop - undefined risk makes expectancy impossible to manage.")
     if drift:
-        audits.append(f"{drift} trade(s) flagged style drift (scalp->swing or vice versa) - Day 5: organize yourself.")
+        audits.append(f"{drift} trade(s) flagged style drift (scalp->swing or vice versa) - decide the trade's timeframe before entry and hold yourself to it.")
     if off_plan:
         audits.append(f"{off_plan} trade(s) deviated from plan - measure the cost of each deviation.")
     if unplanned:
-        audits.append(f"{unplanned} impulse trade(s) - Day 1: when uncertain, reduce size or don't trade.")
+        audits.append(f"{unplanned} impulse trade(s) - unplanned entries are where most edges leak; when uncertain, reduce size or stand aside.")
     if big_losses:
         audits.append(f"{len(big_losses)} loss(es) beyond -1.5R - cutting losers fast is rule #1.")
     cut_fast = [abs(r) for r in rs if r < 0]
     let_run = [r for r in rs if r > 0]
     if cut_fast and let_run and (sum(let_run)/len(let_run)) < (sum(cut_fast)/len(cut_fast)):
-        audits.append("Average winner (R) is smaller than average loser (R) - inverted asymmetry; revisit Day 5 target selection.")
+        audits.append("Average winner (R) is smaller than average loser (R) - inverted asymmetry; review how targets are selected relative to stops.")
 
     return {
         "ok": True, "count": len(trades),

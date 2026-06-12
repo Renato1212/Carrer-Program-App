@@ -89,16 +89,28 @@ def workbench(symbol: str, days: int = 10, session: str = "rth", va_pct: float =
         g = sess[k]
         tpo = np.zeros(n_rows)
         vol = np.zeros(n_rows)
+        dlt = np.zeros(n_rows)
+        period_ranges = []
+        pv_sum = v_sum = 0.0
         for _, bar in g.iterrows():
             b_lo, b_hi, v = float(bar.Low), float(bar.High), float(bar.Volume)
+            b_o, b_c = float(bar.Open), float(bar.Close)
             i0 = max(0, int((b_lo - base) // step))
             i1 = min(n_rows - 1, int((b_hi - base) // step))
             tpo[i0:i1 + 1] += 1
+            period_ranges.append([i0, i1])
             rng = b_hi - b_lo
+            # delta proxy: bar volume signed by where the close sits in the bar's range
+            sgn = (((b_c - b_lo) - (b_hi - b_c)) / rng) if rng > 0 else 0.0
             if v > 0 and rng > 0:
+                pv_sum += v * (b_hi + b_lo + b_c) / 3
+                v_sum += v
                 for i in range(i0, i1 + 1):
                     ov = max(0.0, min(b_hi, grid[i] + step) - max(b_lo, grid[i]))
-                    vol[i] += v * ov / rng
+                    share = v * ov / rng
+                    vol[i] += share
+                    dlt[i] += share * sgn
+        vwap = pv_sum / v_sum if v_sum else None
         sum_tpo += tpo
         sum_vol += vol
         nz = np.nonzero(tpo)[0]
@@ -128,6 +140,10 @@ def workbench(symbol: str, days: int = 10, session: str = "rth", va_pct: float =
             "day": k,
             "tpo": [int(x) for x in tpo],
             "vol": [int(x) for x in vol],
+            "dlt": [int(x) for x in dlt],
+            "period_ranges": period_ranges,
+            "vwap": round(vwap, 4) if vwap else None,
+            "delta_total": int(dlt.sum()),
             "poc_i": poc_i, "vah_i": int(vah_i), "val_i": int(val_i),
             "hi_i": hi_i, "lo_i": lo_i,
             "ib_hi": round(ibh, 4), "ib_lo": round(ibl, 4),
@@ -161,6 +177,7 @@ def workbench(symbol: str, days: int = 10, session: str = "rth", va_pct: float =
             "rf": "Rotation factor: net half-hour rotations (+ = buyers winning the auction bar by bar).",
             "naked": "Dashed ray = naked POC: never revisited since that session - a live magnet.",
             "modes": "TPO = time at price (acceptance). Volume = contracts at price (participation). "
-                     "Compare both: volume without time = event; time without volume = drift.",
+                     "Delta = net aggressive buying minus selling per price (proxy). "
+                     "Compare them: volume without time = an event; time without volume = drift.",
         },
     }

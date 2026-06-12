@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EdgeDesk — Futures Day Trader Command Center</title>
-<meta name="description" content="Pre-trade, in-trade and post-trade edge for futures day traders. Free data, market profile, FedWatch, GEX, news radar, journal.">
+<title>EdgeDesk — Futures Trading Terminal</title>
+<meta name="description" content="A free-data trading terminal for discretionary futures intraday traders: market profile, volume analysis, news squawk, sentiment, economic calendar and central-bank analysis.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/app.css">
@@ -12,7 +12,7 @@
 </head>
 <body>
 <header>
-  <div class="brand">EDGE<span>DESK</span><small>futures command center</small></div>
+  <div class="brand">Edge<span>Desk</span></div>
   <div class="symbol-picker">
     <select id="symbol-select" title="Active instrument"></select>
     <div id="hdr-quote" class="hdr-quote"></div>
@@ -22,25 +22,14 @@
 </header>
 
 <nav id="tabs">
-  <div class="nav-group">
-    <span class="nav-label">Pre-trade</span>
-    <button data-tab="briefing" class="active">🎯 Game Plan</button>
-    <button data-tab="calendar">📅 Calendar</button>
-    <button data-tab="playbooks">📖 Playbooks</button>
-  </div>
-  <div class="nav-group">
-    <span class="nav-label">In-trade</span>
-    <button data-tab="board">⚡ Live Desk</button>
-    <button data-tab="profile">▤ Profile</button>
-    <button data-tab="flow">Γ Flow / GEX</button>
-    <button data-tab="news">🛰 News Radar</button>
-    <button data-tab="predict">🔮 Predictions</button>
-    <button data-tab="cb">🏛 Banks &amp; Macro</button>
-  </div>
-  <div class="nav-group">
-    <span class="nav-label">Post-trade</span>
-    <button data-tab="journal">📊 Journal</button>
-  </div>
+  <button data-tab="briefing" class="active">Today</button>
+  <button data-tab="board">Markets</button>
+  <button data-tab="profile">Profile</button>
+  <button data-tab="news">News</button>
+  <button data-tab="calendar">Calendar</button>
+  <button data-tab="macro">Macro</button>
+  <button data-tab="playbooks">Library</button>
+  <button data-tab="journal">Journal</button>
 </nav>
 
 <main>
@@ -62,7 +51,7 @@
       </div>
       <div class="side-col">
         <div class="panel">
-          <div class="panel-title">🎯 Position Sizer <small>risk first, always</small></div>
+          <div class="panel-title">Position Sizer <button class="info" data-info="Position size is derived from risk, never the other way around: this converts the dollars you are willing to lose (account × risk %) and your stop distance into a contract count. If one contract already risks more than your budget, the correct size is zero — pass, or find tighter structure.">i</button></div>
           <div class="sizer">
             <div><label>Account $</label><input id="sz-acct" type="number" value="50000" step="1000"></div>
             <div><label>Risk %</label><input id="sz-risk" type="number" value="1" step="0.25" min="0.1"></div>
@@ -72,40 +61,48 @@
           <div id="sz-out" class="sz-out muted small">Enter entry &amp; stop to size the trade.</div>
         </div>
         <div class="panel" id="of-panel">
-          <div class="panel-title">🌊 Order Flow Pulse <small>1m delta proxy</small></div>
+          <div class="panel-title">Order Flow Pulse <button class="info" data-info="A real-time read of aggression built from 1-minute data: cumulative delta approximates net buying vs selling pressure, volume bursts flag sudden participation, and tape speed compares current activity to the session's norm. Watch for DIVERGENCE — price rising while delta falls means buyers are being absorbed by passive sellers, a classic warning the move is running on fumes.">i</button></div>
           <div class="muted small">Loading order flow…</div>
         </div>
         <div class="panel">
-          <div class="panel-title">🧭 In-Trade Checklist</div>
+          <div class="panel-title">In-Trade Checklist</div>
           <ul class="clean small check-list">
-            <li>Is price/volume behaving as I pre-defined? If not, that IS the exit signal (Day 4).</li>
-            <li>Scaling in? Ask: would I enter here fresh, with conviction? (Day 5)</li>
-            <li>Momentum dying near target zone → take it; momentum strong → let it work (Day 5).</li>
-            <li>Sudden volume spike + no follow-through after an extended move = exhaustion, cover (Day 4).</li>
-            <li>Don't move the stop except from analysis. No "free trade" fantasy (Day 5).</li>
-            <li>Time stop: trade thesis had a clock — is it overdue?</li>
+            <li>Is price/volume behaving as pre-defined? If not, that IS the exit signal.</li>
+            <li>Scaling in? Ask: would I enter here fresh, with conviction?</li>
+            <li>Momentum dying near the target → take it; momentum strong → let it work.</li>
+            <li>Volume spike with no follow-through after an extended move = exhaustion.</li>
+            <li>Move the stop only on new information, never on hope.</li>
+            <li>The thesis had a clock — is the trade overdue?</li>
           </ul>
         </div>
       </div>
     </div>
     <div class="panel">
-      <div class="panel-title">Relative Volume by 30-min Slot <small>Day 4 — be aggressive when volume is, careful when it isn't</small></div>
+      <div class="panel-title">Relative Volume by 30-min Slot <button class="info" data-info="Grey bars = the 20-day average volume for each half-hour of the day; colored bars = today. Directional moves and clean breakouts almost always happen in the high-volume windows (the open, 10:00 data, the close). When today's bar runs well above its average, the market is paying attention — that's when signals carry weight.">i</button></div>
       <canvas id="relvol-canvas" height="150"></canvas>
       <div class="legend small muted"><span class="lg lg-avg"></span> 20-day average <span class="lg lg-today"></span> today (green = above average)</div>
     </div>
   </section>
 
   <section id="tab-profile" class="tab"><div class="skeleton-page"></div></section>
-  <section id="tab-calendar" class="tab"><div class="skeleton-page"></div></section>
   <section id="tab-news" class="tab"><div class="skeleton-page"></div></section>
-  <section id="tab-predict" class="tab"><div class="skeleton-page"></div></section>
-  <section id="tab-cb" class="tab"><div class="skeleton-page"></div></section>
-  <section id="tab-flow" class="tab"><div class="skeleton-page"></div></section>
+  <section id="tab-calendar" class="tab"><div class="skeleton-page"></div></section>
+
+  <section id="tab-macro" class="tab">
+    <div class="seg seg-lg" id="macro-seg">
+      <button data-sub="cb" class="active">Rates &amp; Banks</button>
+      <button data-sub="flow">Options Flow</button>
+      <button data-sub="predict">Prediction Markets</button>
+    </div>
+    <div id="macro-body"><div class="skeleton-page"></div></div>
+  </section>
+
   <section id="tab-playbooks" class="tab"><div class="skeleton-page"></div></section>
   <section id="tab-journal" class="tab"><div class="skeleton-page"></div></section>
 </main>
 
-<footer class="muted small">EdgeDesk · free data (Yahoo Finance, official RSS wires) · quotes may be delayed · education &amp; infrastructure, not financial advice</footer>
+<div id="popover" class="popover"></div>
+<footer class="muted small">EdgeDesk · free data: Yahoo Finance, FairEconomy calendar, BLS, CNN F&amp;G, official RSS wires · quotes may be delayed · education &amp; infrastructure, not financial advice</footer>
 
 <script src="/static/js/app.js"></script>
 </body>

@@ -33,7 +33,7 @@ def _suggest_setups(lv: dict, gex: dict) -> list[dict]:
     if pdt in ("neutral", "balanced"):
         out.append({"id": "failed-auction", "reason": f"Prior day was {pdt} - failed auctions off the range edges are top-tier."})
     if pdt == "trend":
-        out.append({"id": "liquidation-balance", "reason": "Day after a trend day usually balances (Day 7)."})
+        out.append({"id": "liquidation-balance", "reason": "Day after a trend day usually balances."})
     tpo_flags = [l for l in lv.get("levels", []) if "Poor" in (l.get("note") or "")]
     if tpo_flags:
         out.append({"id": "poor-high-magnet", "reason": f"Unfinished auction at {tpo_flags[0]['name']} {tpo_flags[0]['price']}."})
@@ -47,7 +47,9 @@ def _suggest_setups(lv: dict, gex: dict) -> list[dict]:
 def premarket_briefing(symbol: str = "ES") -> dict:
     now = datetime.now(ET)
     cal = econ_calendar.upcoming(days_ahead=3)
-    today_events = [e for e in cal["events"] if e["days_until"] == 0]
+    today_events = [e for e in cal["events"] if e["days_until"] == 0
+                    and e.get("country", "USD") in ("USD", "")
+                    and e.get("impact") in ("extreme", "high", "medium")]
     lv = levels.key_levels(symbol)
     fw = fedwatch.meeting_probabilities()
     gx = flow.gex_profile(symbol)
@@ -58,7 +60,7 @@ def premarket_briefing(symbol: str = "ES") -> dict:
     warnings = []
     for e in today_events:
         if e["impact"] in ("extreme", "high"):
-            warnings.append(f"{e['event']} at {e['time']} today - plan scenarios beforehand, size down or stand aside into the print (Day 1).")
+            warnings.append(f"{e['event']} at {e['time']} today - plan scenarios beforehand, size down or stand aside into the print.")
     if nw.get("ok"):
         for a in nw["alerts"][:3]:
             if symbol in a["impacts"] or a["tier"] == "critical":
@@ -92,8 +94,8 @@ def premarket_briefing(symbol: str = "ES") -> dict:
             "How did the market trade yesterday and where did it close? (auto-read above)",
             "Where are we opening relative to prior value and range? (auto-read above)",
             "What's on the calendar today, and what's priced in? (auto-read above)",
-            "Mark your levels BEFORE the open; note which are first touches (Day 2).",
-            "Watch the Initial Balance for directional conviction - lean with it (Day 8).",
+            "Mark your levels BEFORE the open; note which are first touches.",
+            "Watch the Initial Balance for directional conviction - lean with it.",
             "Define: what am I hunting today, and what makes me stand aside?",
         ],
     }

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.services import (briefing, composite, correlations, econ_calendar,
                               fedwatch, flow, gameplan, journal, levels,
                               market_data, news, orderflow, playbooks,
-                              predictions, profile, profile_adv)
+                              predictions, profile, profile_adv, sentiment)
 
 app = FastAPI(title="EdgeDesk", version="1.1",
               description="Free-data command center for futures day traders")
@@ -91,13 +91,18 @@ def corr(window: int = 20):
 
 # ----- scheduled + unscheduled news -----
 @app.get("/api/calendar")
-def calendar(days: int = 21):
-    return guard(econ_calendar.upcoming, days)
+def calendar(days: int = 21, country: str = ""):
+    return guard(econ_calendar.upcoming, days, country)
 
 
 @app.get("/api/news")
 def get_news():
     return guard(news.get_news)
+
+
+@app.get("/api/sentiment")
+def market_sentiment():
+    return guard(sentiment.desk)
 
 
 # ----- flow -----

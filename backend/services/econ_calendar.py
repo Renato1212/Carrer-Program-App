@@ -1,155 +1,187 @@
-"""Scheduled-news war calendar.
+"""Economic calendar with real data values.
 
-Rule-generated US macro schedule (NFP = first Friday, claims = Thursdays,
-OPEX = 3rd Friday, etc.) plus published FOMC dates, each with an event-specific
-trading playbook. Dates that follow a typical-but-unofficial pattern are
-flagged `approx` so the trader verifies against the BLS/BEA release pages.
+Primary source: FairEconomy (ForexFactory) weekly JSON - free, no key. Gives
+exact release datetimes, impact, FORECAST and PREVIOUS for every event.
+Secondary: BLS public API v1 (no key) for the latest actual US headline prints.
+Fallback: rule-generated schedule when feeds are unreachable.
 """
 from __future__ import annotations
 
-import calendar
+import json
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
+
+from backend.cache import ttl_cache
 from backend.services.fedwatch import FOMC_DATES
 
 ET = ZoneInfo("America/New_York")
 
-PLAYBOOKS = {
-    "FOMC": {
-        "impact": "extreme", "time": "14:00 ET (presser 14:30)",
-        "playbook": [
-            "Run the Day 14 prep: dots vs pricing, statement language diff, what the Fed is watching.",
-            "Pre-position only with conviction + defined risk; otherwise flat into 14:00 (Day 1: uncertain = don't trade).",
-            "First spike often reverses - the presser sets the real direction. Trade the SECOND move.",
-            "Pre-map reaction levels: prior VAH/VAL, ON extremes - news moves respect structure (Day 2).",
-        ],
-    },
-    "NFP": {
-        "impact": "extreme", "time": "08:30 ET",
-        "playbook": [
-            "Know consensus AND the whisper. The trade is the surprise, including revisions + AHE.",
-            "Conflicting internals (strong jobs, soft wages) = chop. Clean surprise = momentum: join pullbacks showing absorption (Day 10).",
-            "8:30 prints set the overnight breakout or failure - have both scenarios mapped.",
-        ],
-    },
-    "CPI": {
-        "impact": "extreme", "time": "08:30 ET",
-        "playbook": [
-            "Core MoM is the number. 0.1 off consensus = full regime move in ES/NQ/ZN.",
-            "Check ES/ZN correlation regime first - it tells you which direction a hot print hits equities.",
-            "Fade extended first moves only at HTF levels with order-flow confirmation (Day 2/10).",
-        ],
-    },
-    "PPI": {"impact": "high", "time": "08:30 ET",
-            "playbook": ["Pipeline inflation - matters most right after a surprising CPI.",
-                          "Components feed PCE: a hot PCE-relevant PPI can move rates harder than headline."]},
-    "PCE": {"impact": "high", "time": "08:30 ET",
-            "playbook": ["The Fed's preferred gauge. Usually well-forecast after CPI/PPI - muted unless surprise.",
-                          "Month-end Friday release: combines with rebalancing flows - expect odd tape."]},
-    "Retail Sales": {"impact": "high", "time": "08:30 ET",
-                     "playbook": ["Consumer = 70% of GDP. Control group is the signal.",
-                                   "Growth-scare regimes flip the reaction function: bad news = bad."]},
-    "GDP": {"impact": "medium", "time": "08:30 ET",
-            "playbook": ["Backward-looking; advance print moves markets, revisions rarely do."]},
-    "Jobless Claims": {"impact": "medium", "time": "08:30 ET",
-                       "playbook": ["Weekly labor pulse. Matters 10x more when labor is the Fed's focus.",
-                                     "A >20k surprise can set the 8:30 tone on otherwise quiet Thursdays."]},
-    "ISM Manufacturing": {"impact": "high", "time": "10:00 ET",
-                          "playbook": ["10:00 ET = second intraday volatility window after the open.",
-                                        "Prices-paid sub-index can out-move the headline in inflation regimes."]},
-    "ISM Services": {"impact": "high", "time": "10:00 ET",
-                     "playbook": ["Services = sticky inflation. Watch employment + prices components."]},
-    "Michigan Sentiment": {"impact": "medium", "time": "10:00 ET",
-                           "playbook": ["Inflation-expectations component is what the Fed quotes."]},
-    "Treasury Auction (10Y/30Y)": {"impact": "medium", "time": "13:00 ET",
-                                   "playbook": ["Tails/stop-throughs move ZN/ZB instantly, equities second.",
-                                                 "13:00 ET - prime time for an afternoon trend ignition or failure."]},
-    "OPEX": {"impact": "high", "time": "all session",
-             "playbook": ["Monthly options expiration - pinning near big OI strikes, then post-OPEX freedom.",
-                           "Check the GEX map: positive gamma = mean reversion day; flip level = the battlefield."]},
-    "Quad Witching": {"impact": "high", "time": "all session + close",
-                      "playbook": ["Index futures+options expire together: giant volumes at open/close auctions.",
-                                    "Roll volume distorts volume signals - use relative volume vs other quad days."]},
-    "VIX Expiration": {"impact": "medium", "time": "09:30 ET settle",
-                       "playbook": ["Wednesday AM VIX settle can release/spark vol around the open."]},
-    "EIA Crude Inventories": {"impact": "high", "time": "10:30 ET Wed",
-                              "playbook": ["CL's weekly main event. Surprise draw/build = instant momentum burst.",
-                                            "Trade the level it happens AT, not just the number (Day 2)."]},
+FF_URLS = [
+    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
+]
+BLS_URL = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
+BLS_SERIES = {
+    "CUUR0000SA0": "CPI (all items)",
+    "CUUR0000SA0L1E": "Core CPI",
+    "CES0000000001": "Nonfarm Payrolls",
+    "LNS14000000": "Unemployment Rate",
+}
+
+# Event guides: what the number is and how futures usually react.
+EVENT_GUIDES = {
+    "fomc": {"impact": "extreme", "guide": (
+        "The Fed's rate decision (2:00pm ET) and press conference (2:30pm). The market trades the GAP "
+        "between what was priced in beforehand and what is delivered. The first spike after the statement "
+        "frequently reverses once the press conference starts - the second move is usually the honest one.")},
+    "cpi": {"impact": "extreme", "guide": (
+        "Consumer inflation, 8:30am ET. Core MoM is the number that moves markets: 0.1% above or below "
+        "consensus can reprice the entire rate path. Hot print usually = yields up; equities' reaction "
+        "depends on the current regime (check the correlations panel).")},
+    "non-farm": {"impact": "extreme", "guide": (
+        "The monthly US jobs report, 8:30am ET. Three numbers at once: payrolls vs forecast, revisions to "
+        "prior months, and average hourly earnings. Clean surprises produce momentum; conflicting "
+        "internals (strong jobs / soft wages) usually produce chop.")},
+    "ppi": {"impact": "high", "guide": "Producer prices - pipeline inflation. Matters most right after a surprising CPI, since components feed the Fed's preferred PCE gauge."},
+    "pce": {"impact": "high", "guide": "The Fed's preferred inflation gauge. Usually well-forecast once CPI/PPI are out, so surprises are rare but potent."},
+    "retail sales": {"impact": "high", "guide": "The consumer is ~70% of US GDP. The 'control group' line feeds GDP directly and is the real signal."},
+    "gdp": {"impact": "medium", "guide": "Backward-looking. The advance estimate can move markets; later revisions rarely do."},
+    "unemployment claims": {"impact": "medium", "guide": "Weekly labor pulse, Thursdays 8:30am ET. A >20k surprise sets the morning tone, especially when the Fed is focused on the job market."},
+    "ism": {"impact": "high", "guide": "Survey of purchasing managers, 10:00am ET - the second volatility window of the morning. Above 50 = expansion. The 'prices paid' sub-index can out-move the headline."},
+    "consumer sentiment": {"impact": "medium", "guide": "University of Michigan survey. The inflation-expectations component is what the Fed quotes."},
+    "crude oil inventories": {"impact": "high", "guide": "Weekly EIA stockpiles, 10:30am ET Wednesday - crude oil's main scheduled event. Surprise draw = bullish, surprise build = bearish, but the reaction at a key level matters more than the number."},
+    "fed chair": {"impact": "high", "guide": "Chair speeches can reprice the rate path mid-meeting-cycle. Markets parse every deviation from the last statement."},
+    "treasury": {"impact": "medium", "guide": "Auction results at 1:00pm ET. Weak demand (a 'tail') hits bonds instantly and equities second."},
 }
 
 
-def _nth_weekday(year, month, weekday, n) -> date:
-    d = date(year, month, 1)
-    offset = (weekday - d.weekday()) % 7
-    return d + timedelta(days=offset + 7 * (n - 1))
+def _guide_for(title: str) -> dict:
+    t = title.lower()
+    for key, g in EVENT_GUIDES.items():
+        if key in t:
+            return g
+    return {}
 
 
-def _all_weekdays(year, month, weekday):
-    d = date(year, month, 1)
-    offset = (weekday - d.weekday()) % 7
-    d += timedelta(days=offset)
-    while d.month == month:
-        yield d
-        d += timedelta(days=7)
-
-
-def build_calendar(start: date, end: date) -> list[dict]:
+@ttl_cache(seconds=900)
+def _faireconomy() -> list[dict]:
     events = []
+    with httpx.Client(timeout=10, headers={"User-Agent": "Mozilla/5.0 (EdgeDesk)"}) as client:
+        for url in FF_URLS:
+            try:
+                r = client.get(url)
+                r.raise_for_status()
+                events.extend(r.json())
+            except Exception:
+                continue
+    out = []
+    for e in events:
+        try:
+            dt = datetime.fromisoformat(e["date"])
+        except (KeyError, ValueError):
+            continue
+        title = e.get("title", "")
+        guide = _guide_for(title)
+        out.append({
+            "datetime": dt.astimezone(ET).isoformat(),
+            "date": dt.astimezone(ET).date().isoformat(),
+            "time": dt.astimezone(ET).strftime("%H:%M ET"),
+            "event": title,
+            "country": e.get("country", ""),
+            "impact": (e.get("impact") or "Low").lower(),
+            "forecast": e.get("forecast") or "",
+            "previous": e.get("previous") or "",
+            "actual": e.get("actual") or "",
+            "guide": guide.get("guide", ""),
+            "source": "faireconomy",
+        })
+    out.sort(key=lambda x: x["datetime"])
+    return out
 
-    def add(d, name, approx=False):
-        if start <= d <= end:
-            pb = PLAYBOOKS.get(name, {})
-            events.append({"date": d.isoformat(), "event": name,
-                           "impact": pb.get("impact", "medium"),
-                           "time": pb.get("time", ""), "approx": approx,
-                           "playbook": pb.get("playbook", [])})
 
-    months = set()
-    d = start.replace(day=1)
+@ttl_cache(seconds=3600)
+def latest_us_prints() -> list[dict]:
+    """Most recent actual values for headline US series via the keyless BLS API."""
+    try:
+        with httpx.Client(timeout=12) as client:
+            r = client.post(BLS_URL, json={"seriesid": list(BLS_SERIES)},
+                            headers={"Content-Type": "application/json"})
+            r.raise_for_status()
+            data = r.json()
+        out = []
+        for s in data.get("Results", {}).get("series", []):
+            sid = s.get("seriesID")
+            rows = [x for x in s.get("data", []) if x.get("period", "").startswith("M")]
+            if len(rows) < 13:
+                continue
+            latest, prior, yago = rows[0], rows[1], rows[12]
+            name = BLS_SERIES.get(sid, sid)
+            v, vp, vy = float(latest["value"]), float(prior["value"]), float(yago["value"])
+            item = {"name": name, "period": f"{latest['periodName']} {latest['year']}"}
+            if sid.startswith("CUUR"):
+                item["value"] = f"{(v / vy - 1) * 100:.1f}% YoY"
+                item["secondary"] = f"{(v / vp - 1) * 100:.2f}% MoM"
+            elif sid == "CES0000000001":
+                item["value"] = f"{(v - vp):+,.0f}k jobs"
+                item["secondary"] = f"level {v:,.0f}k"
+            else:
+                item["value"] = f"{v:.1f}%"
+                item["secondary"] = f"prior {vp:.1f}%"
+            out.append(item)
+        return out
+    except Exception:
+        return []
+
+
+def _fallback_events(start: date, end: date) -> list[dict]:
+    """Rule-generated skeleton when the live feed is unreachable."""
+    evs = []
+    d = start
     while d <= end:
-        months.add((d.year, d.month))
-        d = (d.replace(day=28) + timedelta(days=7)).replace(day=1)
-
-    for (y, m) in sorted(months):
-        add(_nth_weekday(y, m, 4, 1), "NFP")                       # first Friday
-        for th in _all_weekdays(y, m, 3):
-            add(th, "Jobless Claims")
-        for we in _all_weekdays(y, m, 2):
-            add(we, "EIA Crude Inventories")
-        add(_nth_weekday(y, m, 1, 2), "CPI", approx=True)          # ~2nd Tue (verify BLS)
-        add(_nth_weekday(y, m, 3, 2), "PPI", approx=True)
-        add(_nth_weekday(y, m, 1, 3) + timedelta(days=1), "Retail Sales", approx=True)
-        add(_nth_weekday(y, m, 4, 4), "PCE", approx=True)          # ~last Friday
-        add(_nth_weekday(y, m, 4, 3), "Quad Witching" if m in (3, 6, 9, 12) else "OPEX")
-        add(_nth_weekday(y, m, 2, 3), "VIX Expiration", approx=True)
-        first_bd = next(dd for dd in (date(y, m, 1) + timedelta(days=i) for i in range(7)) if dd.weekday() < 5)
-        add(first_bd, "ISM Manufacturing", approx=True)
-        add(first_bd + timedelta(days=2), "ISM Services", approx=True)
-        add(_nth_weekday(y, m, 4, 2), "Michigan Sentiment", approx=True)
-        add(_nth_weekday(y, m, 2, 2), "Treasury Auction (10Y/30Y)", approx=True)
-        if m in (1, 4, 7, 10):
-            add(_nth_weekday(y, m, 3, 4), "GDP", approx=True)
-
+        if d.weekday() == 4 and d.day <= 7:
+            evs.append(("Non-Farm Payrolls", d, "08:30 ET", "high"))
+        if d.weekday() == 3:
+            evs.append(("Unemployment Claims", d, "08:30 ET", "medium"))
+        if d.weekday() == 2:
+            evs.append(("Crude Oil Inventories", d, "10:30 ET", "high"))
+        d += timedelta(days=1)
     for f in FOMC_DATES:
         if start <= f <= end:
-            pb = PLAYBOOKS["FOMC"]
-            events.append({"date": f.isoformat(), "event": "FOMC Decision",
-                           "impact": pb["impact"], "time": pb["time"],
-                           "approx": False, "playbook": pb["playbook"]})
-
-    events.sort(key=lambda e: (e["date"], e["time"]))
-    return events
+            evs.append(("FOMC Rate Decision", f, "14:00 ET", "extreme"))
+    return [{"datetime": f"{dd.isoformat()}T00:00:00", "date": dd.isoformat(), "time": tm,
+             "event": name, "country": "USD", "impact": imp, "forecast": "", "previous": "",
+             "actual": "", "guide": _guide_for(name).get("guide", ""), "source": "generated"}
+            for name, dd, tm, imp in sorted(evs, key=lambda x: x[1])]
 
 
-def upcoming(days_ahead: int = 21) -> dict:
+def upcoming(days_ahead: int = 14, country: str = "") -> dict:
     today = datetime.now(ET).date()
-    evs = build_calendar(today, today + timedelta(days=days_ahead))
-    for e in evs:
+    live = _faireconomy()
+    if live:
+        events = [e for e in live if today <= date.fromisoformat(e["date"]) <= today + timedelta(days=days_ahead)]
+        if country:
+            events = [e for e in events if e["country"].upper() == country.upper()]
+        source = "live"
+    else:
+        events = _fallback_events(today, today + timedelta(days=days_ahead))
+        source = "generated (live feed unreachable - times/values unavailable)"
+    for e in events:
         e["days_until"] = (date.fromisoformat(e["date"]) - today).days
-    nxt = next((e for e in evs if e["impact"] == "extreme"), None)
+    # ensure FOMC decisions always carry the extreme tag
+    for e in events:
+        if "federal funds rate" in e["event"].lower() or "fomc" in e["event"].lower():
+            e["impact"] = "extreme"
+    nxt = next((e for e in events
+                if e["impact"] in ("extreme", "high") and e["country"] in ("USD", "")
+                and datetime.fromisoformat(e["datetime"]).timestamp() > datetime.now(ET).timestamp()), None)
     return {
-        "ok": True, "today": today.isoformat(), "events": evs, "next_major": nxt,
-        "disclaimer": ("Events marked ~ are rule-generated from the typical release pattern - confirm "
-                       "exact dates on bls.gov / bea.gov / federalreserve.gov calendars."),
+        "ok": True, "today": today.isoformat(), "events": events,
+        "next_major": nxt, "source": source,
+        "us_prints": latest_us_prints(),
+        "how_to_read": (
+            "Forecast = consensus expectation; Previous = last release. Markets move on the SURPRISE "
+            "(actual vs forecast), not the absolute number. Releases marked red (high/extreme) regularly "
+            "move futures several points within seconds - plan position size around them."),
     }

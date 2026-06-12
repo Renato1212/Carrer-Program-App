@@ -38,7 +38,7 @@ def pulse(symbol: str, bars: int = 180) -> dict:
     delta = np.array([_bar_delta(*x) for x in zip(o, h, l, c, v)])
     cum = np.cumsum(delta)
 
-    # volume spikes: > 3x rolling median of prior 20 bars (Day 10: sudden acceleration)
+    # volume spikes: > 3x rolling median of prior 20 bars
     spikes = []
     for i in range(20, len(v)):
         base = np.median(v[i - 20:i]) or 1
@@ -63,17 +63,17 @@ def pulse(symbol: str, bars: int = 180) -> dict:
     if px_dir and dl_dir and px_dir != dl_dir:
         side = "sellers" if px_dir > 0 else "buyers"
         signals.append(f"Divergence: price moved {'up' if px_dir>0 else 'down'} while delta proxy went the other "
-                       f"way - aggressive {side} are being absorbed. Watch for the unwind (Day 10/11).")
+                       f"way - aggressive {side} are being absorbed. Watch for the unwind.")
     if speed > 2.0:
         signals.append(f"Tape speed {speed:.1f}x session average - acceleration phase. After a calm period this is "
-                       "an entry clue; after an extended move it's an exit clue (Day 10).")
+                       "an entry clue; after an extended move it's an exit clue.")
     elif speed < 0.5:
         signals.append(f"Tape speed {speed:.1f}x - quiet tape. Manipulative ladder games live here; breakouts "
-                       "lack fuel (Day 12). Better to wait for participation.")
+                       "lack fuel. Better to wait for participation.")
     if spikes and spikes[-1]["time"] >= times[-3]:
         s = spikes[-1]
         signals.append(f"Fresh {s['side']}-side volume burst ({s['mult']}x) at {s['price']} - check for follow-"
-                       "through: spike + no progress at an extreme = exhaustion (Day 4).")
+                       "through: spike + no progress at an extreme = exhaustion.")
     if not signals:
         signals.append("No notable relative change right now - the keyword is CHANGE; stand by until the tape shifts.")
 

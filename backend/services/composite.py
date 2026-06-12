@@ -4,7 +4,7 @@ Three reads traders actually use:
 1. Composite volume profile over N sessions: the real HVN/LVN magnets.
 2. Value migration: how value moved day over day (the auction's trend).
 3. Unfinished business: naked POCs, unfilled gaps, untested poor extremes -
-   magnets the market tends to come back for (Day 7/9: map prior activity).
+   magnets the market tends to come back for.
 """
 from __future__ import annotations
 
@@ -57,17 +57,17 @@ def composite_pack(symbol: str, days: int = 10) -> dict:
     downs = sum(r in ("lower", "overlap-down") for r in recent)
     if ups >= 3:
         trend = ("up", "Value has migrated HIGHER - buyers control the auction. Pullbacks into prior "
-                       "value are buy candidates until a value-lower day appears (Day 6).")
+                       "value are buy candidates until a value-lower day appears.")
     elif downs >= 3:
         trend = ("down", "Value has migrated LOWER - sellers control the auction. Rallies into prior "
-                         "value are sell candidates until a value-higher day appears (Day 6).")
+                         "value are sell candidates until a value-higher day appears.")
     elif all(r == "inside" or r and r.startswith("overlap") for r in recent) and recent:
         trend = ("balance", "Value is overlapping/inside for several sessions - the market is BALANCING. "
                             "Expect rotation between composite value edges; the eventual break carries "
-                            "stored energy (Day 3: compression = explosiveness).")
+                            "stored energy.")
     else:
         trend = ("mixed", "Value migration is mixed - two-sided auction, take what each side gives and "
-                          "keep size honest (Day 1: when uncertain, reduce size).")
+                          "keep size honest.")
 
     # ---- composite volume profile ----
     rows = [sessions[d] for d in use_days]
@@ -144,9 +144,9 @@ def composite_pack(symbol: str, days: int = 10) -> dict:
         "explainers": {
             "composite": "The N-day composite shows where the market has ACCEPTED price (fat = HVN magnets) "
                          "and rejected it (thin = LVN vacuum). Price travels fast through thin zones and "
-                         "slows inside fat ones - target the next fat zone, risk behind the thin one (Day 6).",
+                         "slows inside fat ones - target the next fat zone, risk behind the thin one.",
             "naked_poc": "Naked POC = a prior day's fairest price never revisited. Strong magnet - markets "
-                         "have a habit of coming back to finish that business (Day 9: map prior activity).",
+                         "have a habit of coming back to finish that business.",
             "migration": "Each row = one auction. Read the Relation column top-down to see who has been "
                          "winning the war for value - that's your strategic bias, updated daily.",
         },

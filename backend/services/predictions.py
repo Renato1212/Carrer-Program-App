@@ -120,11 +120,11 @@ def desk() -> dict:
             "Treat these as a SECOND OPINION vs ZQ-implied Fed pricing (Banks & Macro tab): when prediction "
             "markets and rate futures disagree, one of them is wrong - that gap is information.",
             "A hard repricing with no headline yet = positioning is changing before the news. Check the related "
-            "futures (chips on each market) for early order-flow confirmation (Day 10: relative change).",
+            "futures (chips on each market) for early order-flow confirmation.",
             "Geopolitical markets are a crisis radar for CL and GC - a war/strike market jumping 10+ points "
             "deserves a look at energy and metals before the wires catch up.",
             "Event-day base rates: what the crowd prices at 90%+ rarely moves markets when confirmed - "
-            "the trade lives in the 30-70% zone where resolution genuinely repricess assets (Day 14).",
+            "the trade lives in the 30-70% zone where resolution genuinely repricess assets.",
         ],
     }
 

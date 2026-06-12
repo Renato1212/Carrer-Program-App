@@ -104,7 +104,7 @@ def meeting_probabilities() -> dict:
         "meetings": results,
         "method": "Backed out of 30-Day Fed Funds futures (ZQ) the same way CME FedWatch does.",
         "playbook": [
-            "Compare implied probabilities to the statement/dots: the TRADE is in the gap between what's priced and what's delivered (Day 14).",
+            "Compare implied probabilities to the statement/dots: the TRADE is in the gap between what's priced and what's delivered.",
             "2:00 ET statement: first move is often the trap - the presser (2:30) drives the real auction.",
             "Watch the implied path REPRICE live: a 10bp shift in the next 2 meetings is the day's true headline.",
             "Pair with 2Y yield: equities follow the front end on CB days, not the long end.",
@@ -139,13 +139,13 @@ def central_bank_desk() -> dict:
         "yield_curve": yield_curve(),
         "other_banks": OTHER_CB,
         "prep_process": {
-            "title": "Day 14 - Central Bank Prep Process",
+            "title": "Central Bank Meeting Prep",
             "items": [
                 "Dot plots: where is the committee's median vs market pricing?",
                 "Central bank language: what changed vs last statement? (diff the statements line by line)",
                 "What markets are pricing in: read the ZQ-implied path above BEFORE the event",
                 "What central bankers are paying attention to right now: inflation? labor? financial stability?",
-                "Define scenarios pre-event: dovish/hawkish/in-line -> planned reaction for each, or stand aside (Day 1: when uncertain, reduce size or don't trade)",
+                "Define scenarios pre-event: dovish/hawkish/in-line -> planned reaction for each, or stand aside",
             ],
         },
     }

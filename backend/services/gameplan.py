@@ -49,7 +49,7 @@ def _zone_action(parts: list[dict], side: str) -> str:
         bits.append("heavy acceptance - expect price to slow and rotate here; good profit-taking area")
     if names & {"Prior VAH", "Prior VAL", "Composite VAH", "Composite VAL"}:
         bits.append(("FIRST touch of value edge - fade candidate with order-flow confirmation"
-                     if fresh else "tested value edge - weakening reactions favor the break (Day 4)"))
+                     if fresh else "tested value edge - weakening reactions favor the break"))
     if "Zero-Gamma Flip" in names:
         bits.append("gamma regime flips through here - expect volatility character to change")
     if names & {"Overnight High", "Overnight Low"}:
@@ -199,8 +199,8 @@ def build(symbol: str = "ES") -> dict:
     if g.get("ok") and g.get("regime") == "negative":
         do.append("Negative gamma: momentum extends - let a core run with a structure trail.")
     if any(e["impact"] == "extreme" for e in b.get("today_events") or []):
-        dont.append("Don't carry size into the release (Day 1: when uncertain, reduce or stand aside).")
-    do.append("Mark the first touch of each A-zone - first touches get the cleanest reactions (Day 2).")
+        dont.append("Don't carry size into the release.")
+    do.append("Mark the first touch of each A-zone - first touches get the cleanest reactions.")
 
     return {
         "ok": True, "symbol": symbol, "generated": datetime.now(ET).isoformat(timespec="minutes"),

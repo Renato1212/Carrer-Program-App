@@ -105,7 +105,7 @@ def gex_profile(symbol: str = "ES") -> dict:
                      "strikes; breakout trades need extra confirmation."
                      if regime == "positive" else
                      "NEGATIVE net gamma: dealers chase moves - trends extend, vol expands. Momentum playbook "
-                     "on; respect stop-run acceleration through LVNs (Day 12/13)."),
+                     "on; respect stop-run acceleration through LVNs."),
         }
     except Exception as e:
         return {"ok": False, "error": str(e)[:200]}
@@ -147,7 +147,7 @@ def flow_desk(symbol: str = "ES") -> dict:
         "gex": gex_profile(symbol),
         "expirations": expiration_calendar(),
         "playbook": [
-            "Daily: locate spot vs zero-gamma flip. Above in +gamma = rotational day types more likely; below in -gamma = trend/liquidation day types more likely. Marry this to your Day 7 day-type read.",
+            "Daily: locate spot vs zero-gamma flip. Above in +gamma = rotational day types more likely; below in -gamma = trend/liquidation day types more likely. Marry this to the session's day-type read in the Profile tab.",
             "OPEX week: large OI strikes act like HVN magnets - combine with the profile's POC for confluence targets.",
             "Big OI strike + LVN behind it = asymmetric breakout spot when gamma is negative.",
             "Post-OPEX Monday: the pin is gone - ranges expand, yesterday's 'respected' level may vaporize.",
