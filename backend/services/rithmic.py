@@ -33,6 +33,8 @@ _state = {
     "ticks": {},
     "started": None,
     "stop": False,
+    "attempts": [],
+    "valid_systems": [],
 }
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
@@ -111,23 +113,81 @@ def _record_tick(data: dict):
         t["ts"] = time.time()
 
 
-def _run_client(creds: dict):
-    """Background thread: own asyncio loop, persistent Rithmic connection."""
+def _translate_error(exc: Exception) -> str:
+    """Turn the library's opaque failures into an actionable diagnosis."""
+    name = type(exc).__name__
+    msg = str(exc)
+    if "heartbeat_interval" in msg and name == "AttributeError":
+        return ("LOGIN REJECTED by Rithmic - the gateway accepted the system name but returned no "
+                "successful login. This almost always means API access is not enabled for these "
+                "credentials. Fix: log in to Rithmic R Trader Pro or the Rithmic dashboard, and make "
+                "sure your account has 'R | API' / market-data access enabled (the free paper account "
+                "needs API access requested separately from rithmic.com). Then reconnect.")
+    if "valid SYSTEM_NAME" in msg:
+        # library lists the valid systems in the exception text
+        return "SYSTEM NAME not found on this gateway. " + msg
+    if "CERTIFICATE_VERIFY" in msg or "SSL" in name:
+        return ("TLS handshake failed - the network is intercepting the secure connection to Rithmic. "
+                "This happens on some corporate/proxied networks; try a normal network.")
+    if "ConnectionClosed" in name or "timed out" in msg.lower() or "TimeoutError" in name:
+        return ("Could not reach the Rithmic gateway (connection closed/timed out). The gateway region "
+                "may be wrong for your account, or the network blocks outbound 443 to rithmic.com.")
+    return f"{name}: {msg}"[:300]
+
+
+def _extract_valid_systems(exc: Exception) -> list[str]:
+    msg = str(exc)
+    if "valid SYSTEM_NAME" in msg and "[" in msg:
+        import re
+        inner = msg[msg.find("["): msg.rfind("]") + 1]
+        return re.findall(r"'([^']+)'|\"([^\"]+)\"", inner) and \
+            [a or b for a, b in re.findall(r"'([^']+)'|\"([^\"]+)\"", inner)] or []
+    return []
+
+
+def _run_client(creds: dict, candidates: list[tuple[str, str]]):
+    """Background thread: try each (system, gateway) candidate until one logs in."""
     import asyncio
 
-    async def main():
+    async def try_one(system: str, gateway: str):
         from async_rithmic import DataType, RithmicClient, SysInfraType
         client = RithmicClient(
             user=creds["user"], password=creds["password"],
-            system_name=creds["system"],
-            app_name="EdgeDesk", app_version="1.0",
-            url=creds["gateway"],
+            system_name=system, app_name="EdgeDesk", app_version="1.0",
+            url=gateway,
         )
-        await client.connect(plants=[SysInfraType.TICKER_PLANT])
-        with _lock:
-            _state.update(connected=True, connecting=False, error=None,
-                          system=creds["system"], user=creds["user"],
-                          gateway=creds["gateway"], started=time.time())
+        await asyncio.wait_for(client.connect(plants=[SysInfraType.TICKER_PLANT]), timeout=30)
+        return client
+
+    async def main():
+        from async_rithmic import DataType
+        client = None
+        for system, gateway in candidates:
+            with _lock:
+                _state["attempts"].append({"system": system, "gateway": gateway, "result": "trying…"})
+            try:
+                client = await try_one(system, gateway)
+                with _lock:
+                    _state["attempts"][-1]["result"] = "LOGGED IN"
+                    _state.update(connected=True, connecting=False, error=None,
+                                  system=system, user=creds["user"],
+                                  gateway=gateway, started=time.time())
+                break
+            except Exception as e:
+                diag = _translate_error(e)
+                vsys = _extract_valid_systems(e)
+                with _lock:
+                    _state["attempts"][-1]["result"] = diag[:160]
+                    if vsys:
+                        _state["valid_systems"] = vsys
+                    _state["error"] = diag
+                client = None
+                continue
+
+        if client is None:
+            with _lock:
+                _state.update(connected=False, connecting=False)
+            return
 
         async def on_tick(data):
             try:
@@ -136,7 +196,6 @@ def _run_client(creds: dict):
                 pass
 
         client.on_tick += on_tick
-
         flags = DataType.LAST_TRADE | DataType.BBO
         for root, exch in (("ES", "CME"), ("NQ", "CME"), ("CL", "NYMEX"), ("GC", "COMEX")):
             try:
@@ -146,7 +205,7 @@ def _run_client(creds: dict):
                 with _lock:
                     _state["error"] = f"subscribe {root}: {type(e).__name__}: {e}"[:200]
 
-        while True:                                   # keep the connection alive
+        while True:
             await asyncio.sleep(2)
             with _lock:
                 if _state["stop"]:
@@ -162,8 +221,7 @@ def _run_client(creds: dict):
             _state.update(connected=False, connecting=False)
     except Exception as e:
         with _lock:
-            _state.update(connected=False, connecting=False,
-                          error=f"{type(e).__name__}: {e}"[:300])
+            _state.update(connected=False, connecting=False, error=_translate_error(e))
 
 
 def connect(user: str, password: str, system: str, gateway: str | None = None) -> dict:
@@ -177,21 +235,36 @@ def connect(user: str, password: str, system: str, gateway: str | None = None) -
     gateway = (gateway or "").strip() or default_gateway(system)
     if "://" not in gateway:
         gateway = "wss://" + gateway
+
+    # Build a bounded candidate list. The chosen pairing first, then likely
+    # alternates: a fresh rithmic.com signup usually needs "Rithmic Test" on the
+    # Test gateway, while funded paper runs as "Rithmic Paper Trading" on Chicago.
+    test_gw = GATEWAYS["Test environment"]
+    chi_gw = GATEWAYS["Chicago Area"]
+    candidates: list[tuple[str, str]] = [(system, gateway)]
+
+    def add(sys_name, gw):
+        if (sys_name, gw) not in candidates:
+            candidates.append((sys_name, gw))
+
+    add(system, test_gw)
+    add(system, chi_gw)
+    add("Rithmic Test", test_gw)
+    add("Rithmic Paper Trading", chi_gw)
+
     global _thread
     with _lock:
         if _state["connecting"] or _state["connected"]:
             return {"ok": False, "error": "already connected/connecting - disconnect first"}
-        _state.update(connecting=True, error=None, stop=False, gateway=gateway)
+        _state.update(connecting=True, error=None, stop=False, gateway=gateway,
+                      attempts=[], valid_systems=[])
     save_credentials(user, password, system, gateway)
-    _thread = threading.Thread(
-        target=_run_client,
-        args=({"user": user, "password": password, "system": system, "gateway": gateway},),
-        daemon=True)
+    _thread = threading.Thread(target=_run_client, args=(
+        {"user": user, "password": password}, candidates), daemon=True)
     _thread.start()
     return {"ok": True, "status": "connecting", "note": (
-        f"Connecting to {gateway} as system '{system}'. Poll /api/rithmic/status. "
-        "If login is rejected, verify the SYSTEM NAME matches exactly what your provider gave you "
-        "and that this gateway region is the one your account is provisioned on.")}
+        f"Connecting as '{system}'. Trying {gateway} first, then other regions automatically. "
+        "Poll /api/rithmic/status for the per-gateway result.")}
 
 
 def disconnect() -> dict:
@@ -213,6 +286,8 @@ def status() -> dict:
             "connected": _state["connected"],
             "connecting": _state["connecting"],
             "error": _state["error"],
+            "attempts": list(_state["attempts"]),
+            "valid_systems": list(_state["valid_systems"]),
             "system": _state["system"],
             "gateway": _state["gateway"],
             "user": (_state["user"][:3] + "***") if _state["user"] else None,

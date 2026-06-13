@@ -1641,9 +1641,15 @@ async function loadRithmic() {
       ? `<p class="small" style="color:var(--amber)">This deployment is serverless, which cannot hold a live broker socket. Deploy EdgeDesk's included Render blueprint (README → "Always-on deployment", free tier) to get a web instance that connects Rithmic directly in the browser — no local install needed.</p>` : "";
     const lib = !s.lib_installed
       ? `<p class="muted small">${esc(s.lib_info)}</p>` : "";
+    const attempts = (s.attempts || []).map(a =>
+      `<div class="small muted" style="font-family:var(--mono);font-size:10.5px">${esc((a.gateway || "").replace("wss://", "").replace(":443", ""))}: ${esc(a.result)}</div>`).join("");
+    const valid = (s.valid_systems || []).length
+      ? `<p class="small mt8">Valid systems on this gateway: ${s.valid_systems.map(v => `<code>${esc(v)}</code>`).join(" ")} — pick the exact one and reconnect.</p>` : "";
     body.innerHTML = `
       <div><span class="src-dot"></span> Delayed data (Yahoo) ${s.connecting ? "· <b class='accent'>connecting…</b>" : ""}</div>
       ${s.error ? `<p class="small" style="color:var(--red)">${esc(s.error)}</p>` : ""}
+      ${attempts ? `<div class="mt8">${attempts}</div>` : ""}
+      ${valid}
       ${blocked}${lib}
       <details class="mt8"><summary class="small" style="cursor:pointer;color:var(--blue)">Connect Rithmic credentials (Apex, Lucid, TPT…)</summary>
         <div class="sizer mt8">
