@@ -47,6 +47,7 @@ def _new_book(symbol: str, anchor: float) -> dict:
         "cancels": 0, "adds": 0,
         "pv_sum": 0.0, "v_sum": 0.0,
         "frames": 0,
+        "heat": [],
         "rng": rng,
         "t0": time.time(),
     }
@@ -203,6 +204,14 @@ def step(symbol: str) -> dict:
                 "vol": int(b["vp"].get(p, 0)),
                 "ice": bool(ice and abs(p - ice["price"]) < tick / 2),
             })
+
+        # ---- bookmap heatmap history: one column per frame, resting size at price ----
+        frame = {round(l["price"], 6): (l["bid"] + l["ask"]) for l in ladder if (l["bid"] + l["ask"])}
+        frame_traded = {round(p, 6): int(v) for p, v in
+                        ((t["price"], t["size"]) for t in b["trades"][-len(path) * 4:])}
+        b["heat"].append({"t": int(time.time()), "last": new_last,
+                          "liq": frame, "trd": frame_traded})
+        del b["heat"][:-150]
         sum_bid = sum(l for l in (
             _size_at(b, _round_tick(new_last - i * tick, tick), "bid") for i in range(1, LEVELS + 1)))
         sum_ask = sum(l for l in (
@@ -224,6 +233,7 @@ def step(symbol: str) -> dict:
             "vwap": round(b["pv_sum"] / b["v_sum"], 4) if b["v_sum"] else None,
             "imbalance": round(sum_bid / (sum_bid + sum_ask) * 100, 1) if (sum_bid + sum_ask) else 50.0,
             "poc": vp_sorted[0][0] if vp_sorted else None,
+            "heat": list(b["heat"]),
             "signals": list(reversed(b["signals"])),
             "note": ("Prices anchored to the real market"
                      + (" (LIVE Rithmic feed)" if source == "rithmic-live" else " (delayed quote)")

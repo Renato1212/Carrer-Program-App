@@ -1448,8 +1448,73 @@ async function pollDom() {
     renderLadder(d);
     renderDomAccount(d);
     renderDomSide(d);
+    renderHeatmap(d);
   } catch (e) { /* transient */ }
   finally { domBusy = false; }
+}
+
+function renderHeatmap(d) {
+  const cv = $("#heat-canvas");
+  if (!cv) return;
+  const sym = $("#heat-symbol"); if (sym) sym.textContent = state.symbol;
+  const src = $("#heat-src"); if (src) src.textContent = d.source + (d.simulated_book ? " · book simulated (training)" : "");
+  const heat = d.heat || [];
+  const {ctx, W, H} = hiDPI(cv);
+  ctx.fillStyle = "#0a0a0c"; ctx.fillRect(0, 0, W, H);
+  if (heat.length < 2) {
+    ctx.fillStyle = "#6e6e76"; ctx.font = "12px JetBrains Mono";
+    ctx.fillText("building heatmap… (watch it fill from the right)", 16, H / 2);
+    return;
+  }
+  const tick = d.tick;
+  // price axis: pad around the session range so walls above/below price are visible
+  let lo = d.session_lo, hi = d.session_hi;
+  heat.forEach(f => Object.keys(f.liq).forEach(p => { p = +p; if (p < lo) lo = p; if (p > hi) hi = p; }));
+  const pad = (hi - lo) * 0.04 + tick;
+  lo -= pad; hi += pad;
+  const rows = Math.min(180, Math.max(20, Math.round((hi - lo) / tick)));
+  const rowH = (H) / rows;
+  const colW = W / heat.length;
+  const yOf = p => H - ((p - lo) / (hi - lo)) * H;
+  // max liquidity for color scaling
+  let maxLiq = 1;
+  heat.forEach(f => Object.values(f.liq).forEach(v => { if (v > maxLiq) maxLiq = v; }));
+  // draw liquidity cells
+  heat.forEach((f, ci) => {
+    const x = ci * colW;
+    for (const [ps, v] of Object.entries(f.liq)) {
+      const y = yOf(+ps);
+      const a = Math.min(1, v / maxLiq);
+      // colormap: dark blue -> blue -> cyan -> yellow for heavy walls
+      let col;
+      if (a < 0.33) col = `rgba(30,60,110,${0.35 + a})`;
+      else if (a < 0.66) col = `rgba(46,111,176,${0.55 + a * 0.4})`;
+      else col = `rgba(255,${Math.round(214 - (a - 0.66) * 200)},10,${0.7 + a * 0.3})`;
+      ctx.fillStyle = col;
+      ctx.fillRect(x, y - rowH / 2, colW + 0.6, Math.max(1, rowH));
+    }
+    // traded volume dots
+    for (const [ps, sz] of Object.entries(f.trd || {})) {
+      const y = yOf(+ps);
+      const r = Math.min(5, 1 + Math.sqrt(sz) / 3);
+      ctx.fillStyle = "rgba(255,255,255,.85)";
+      ctx.beginPath(); ctx.arc(x + colW / 2, y, r, 0, 7); ctx.fill();
+    }
+  });
+  // last-price line
+  ctx.strokeStyle = "#ffd60a"; ctx.lineWidth = 1.5; ctx.beginPath();
+  heat.forEach((f, ci) => {
+    const x = ci * colW + colW / 2, y = yOf(f.last);
+    ci ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+  // price axis labels
+  ctx.fillStyle = "#98989f"; ctx.font = "10px JetBrains Mono";
+  const dp = tick < 0.01 ? 4 : tick < 1 ? 2 : 0;
+  for (let i = 0; i <= 6; i++) {
+    const p = lo + (hi - lo) * i / 6;
+    ctx.fillText(fmt(p, dp), 3, Math.min(H - 2, Math.max(9, yOf(p))));
+  }
 }
 
 function renderLadder(d) {

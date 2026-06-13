@@ -92,6 +92,16 @@
   </section>
 
   <section id="tab-trade" class="tab">
+    <div class="panel">
+      <div class="panel-title">Liquidity Heatmap <span id="heat-symbol" class="accent"></span>
+        <button class="info" data-info="A Bookmap-style view of resting liquidity over time. The vertical axis is price, the horizontal axis is time (newest on the right). Brighter / hotter cells = more resting size stacked at that price — these are the walls the market has to eat through. Bright horizontal streaks that persist are real defended levels; streaks that suddenly vanish are pulled liquidity (spoof/cancellation). White dots are executed trades sized by volume; the yellow line is last price. Combine it with the stop-run, iceberg and cancellation flags in the panel below.">i</button>
+        <small id="heat-src"></small></div>
+      <canvas id="heat-canvas" height="300"></canvas>
+      <div class="legend small muted"><span class="lg" style="background:#1a2740"></span>thin
+        <span class="lg" style="background:#2e6fb0"></span>medium
+        <span class="lg" style="background:#ffd60a"></span>heavy wall
+        · <span style="color:#fff">•</span> trades · <span style="color:#ffd60a">—</span> last price</div>
+    </div>
     <div class="trade-grid">
       <div class="panel" id="dom-panel"><div class="loading">Loading DOM…</div></div>
       <div class="side-col">
